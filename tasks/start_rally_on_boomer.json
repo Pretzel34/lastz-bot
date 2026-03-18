@@ -1,0 +1,112 @@
+{
+  "name": "start_rally_on_boomer",
+  "actions": [
+    {
+      "action": "rally_count_check",
+      "note": "Abort if daily rally limit already reached"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "If in HQ, tap to go to world. If already in world, skip."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Second attempt — if first tap missed or world didn't load, try again"
+    },
+    {
+      "action": "wait",
+      "seconds": 10.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_search.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_search.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_boomer.png",
+      "fallback_template": "btn_frostbane_boomer.png",
+      "required": false,
+      "note": "Select Boomer category — tries btn_boomer.png first, falls back to btn_frostbane_boomer.png"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "adjust_boomer_level",
+      "setting": "rally.boomer_level",
+      "template_pattern": "btn_lvl_{value}_boomer.png",
+      "plus_template": "btn_plus_boomer.png",
+      "minus_template": "btn_subtract_boomer_lvl.png",
+      "min_level": 1,
+      "max_level": 8,
+      "max_attempts": 20,
+      "tap_delay": 3.0,
+      "required": false,
+      "note": "Detect current boomer level and tap +/- until it matches rally.boomer_level setting"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_search_boomer.png",
+      "required": false,
+      "note": "Search with the correct level now set"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_team_up_boomer.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_march_on_boomer.png",
+      "required": false,
+      "exhaust_rallies_if_not_found": true,
+      "log_skip": "March not available — troops are busy, stopping all rally attempts",
+      "note": "If march is not present, troops are occupied — exhaust counter and abort"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 91.9,
+      "y_pct": 94.8,
+      "note": "GO HQ"
+    }
+  ]
+}

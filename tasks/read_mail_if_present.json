@@ -1,0 +1,51 @@
+{
+  "name": "read_mail_if_present",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "x_pct": 91.1,
+      "y_pct": 95.6,
+      "note": "Verify we are in HQ view before starting"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 93.3,
+      "y_pct": 81.8,
+      "note": "Mail"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_template",
+      "template": "btn_read_all.png",
+      "timeout": 4,
+      "note": "Tap btn_read_all.png at approx (430,918)"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_clear.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_back.png",
+      "required": false
+    }
+  ]
+}

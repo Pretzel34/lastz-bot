@@ -1,0 +1,17 @@
+{
+  "name": "center_hq",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "x_pct": 91.1,
+      "y_pct": 95.6,
+      "note": "x_pct/y_pct = fixed position of return-to-HQ button"
+    },
+    {
+      "action": "wait",
+      "seconds": 1.5
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "emulator": {
+    "host": "127.0.0.1",
+    "ports": [
+      21503
+    ],
+    "adb_path": "adb"
+  },
+  "bot": {
+    "template_dir": "templates",
+    "log_dir": "logs",
+    "tasks_dir": "tasks",
+    "screenshot_on_error": true,
+    "retry_failed_actions": true,
+    "max_retries": 2,
+    "retry_delay_seconds": 2.0,
+    "loop_tasks": false,
+    "loop_delay_seconds": 60.0
+  },
+  "vision": {
+    "confidence_threshold": 1.0
+  }
+}

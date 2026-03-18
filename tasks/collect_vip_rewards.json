@@ -1,0 +1,66 @@
+{
+  "name": "collect_vip_rewards",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "x_pct": 91.1,
+      "y_pct": 95.6,
+      "note": "Verify we are in HQ view before starting"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "tap",
+      "x": 30,
+      "y": 108
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_vip_chest.png",
+      "required": false,
+      "log_success": "VIP chest available — claiming",
+      "log_skip": "VIP chest not found — checking if already claimed"
+    },
+    {
+      "action": "check_claimed",
+      "claimed_template": "btn_vip_treasure_claimed.png",
+      "claimed_message": "VIP treasure already claimed — continuing",
+      "note": "Check if chest was already claimed today"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_vip_freebie.png",
+      "required": false,
+      "log_success": "VIP freebie available — claiming",
+      "log_skip": "VIP freebie not found — checking if already claimed"
+    },
+    {
+      "action": "check_claimed",
+      "claimed_template": "btn_freebie_vip_claimed.png",
+      "claimed_message": "VIP freebie already claimed — continuing",
+      "note": "Check if freebie was already claimed today"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_clear.png",
+      "required": false,
+      "note": "Clear any popup"
+    }
+  ]
+}

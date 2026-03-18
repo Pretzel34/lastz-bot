@@ -1,0 +1,233 @@
+{
+  "farms": [
+    {
+      "name": "Prex Farm 1",
+      "emu_index": 1,
+      "port": 21503,
+      "enabled": false,
+      "tasks": {
+        "collect_resources": {
+          "enabled": true,
+          "collect_food": true,
+          "collect_wood": true,
+          "collect_metal": true,
+          "collect_oil": false
+        },
+        "train_troops": {
+          "enabled": true,
+          "troop_type": "Infantry",
+          "fill_queue": true,
+          "use_speedups": false
+        },
+        "daily_quests": {
+          "enabled": true,
+          "claim_rewards": true,
+          "claim_vip": true,
+          "claim_daily_gift": true
+        },
+        "auto_battle": {
+          "enabled": true,
+          "battle_mode": "Normal",
+          "max_attempts": "10",
+          "use_tickets": true
+        },
+        "build_upgrade": {
+          "enabled": true,
+          "auto_upgrade": true,
+          "use_builders": true,
+          "priority": "Headquarters"
+        },
+        "alliance": {
+          "enabled": true,
+          "help_allies": true,
+          "donate_tech": true,
+          "collect_gift": true
+        },
+        "collect_mail": {
+          "enabled": true,
+          "collect_all": true
+        },
+        "daily_tasks": {
+          "enabled": true,
+          "collect_idle_reward": false,
+          "collect_free_rewards": false,
+          "collect_vip_rewards": false,
+          "collect_radar": true,
+          "Collect Fuel": false,
+          "Read Mail": true,
+          "complete_radar": true,
+          "collect_recruits": false
+        },
+        "rally": {
+          "enabled": true,
+          "quick_join_rally": false,
+          "create_rally": true,
+          "boomer_level": 5,
+          "use_max_formations": true,
+          "max_rallies_per_day": 6
+        }
+      }
+    },
+    {
+      "name": "Farm 2",
+      "emu_index": 2,
+      "port": 21513,
+      "enabled": true,
+      "tasks": {
+        "daily_tasks": {
+          "enabled": false,
+          "collect_idle_reward": false,
+          "collect_free_rewards": false,
+          "collect_vip_rewards": false,
+          "collect_radar": true,
+          "complete_radar": true,
+          "Collect Fuel": false,
+          "Read Mail": true,
+          "collect_recruits": false
+        },
+        "rally": {
+          "enabled": false,
+          "quick_join_rally": false,
+          "create_rally": true,
+          "boomer_level": 5,
+          "use_max_formations": true,
+          "max_rallies_per_day": 6
+        },
+        "gathering": {
+          "enabled": true,
+          "collect_wood": true,
+          "collect_food": true,
+          "collect_electricity": false,
+          "collect_zents": false,
+          "resource_site_level": 2,
+          "max_formations": 3
+        }
+      }
+    },
+    {
+      "name": "Farm 3",
+      "emu_index": 3,
+      "port": 21523,
+      "enabled": false,
+      "tasks": {
+        "daily_tasks": {
+          "enabled": false,
+          "collect_idle_reward": false,
+          "collect_free_rewards": false,
+          "collect_vip_rewards": false,
+          "collect_radar": true,
+          "complete_radar": true,
+          "Collect Fuel": false,
+          "Read Mail": true,
+          "collect_recruits": false
+        },
+        "rally": {
+          "enabled": false,
+          "quick_join_rally": false,
+          "create_rally": true,
+          "boomer_level": 5,
+          "use_max_formations": true,
+          "max_rallies_per_day": 6
+        },
+        "gathering": {
+          "enabled": true,
+          "collect_wood": true,
+          "collect_food": true,
+          "collect_electricity": false,
+          "collect_zents": false,
+          "resource_site_level": 6,
+          "max_formations": 3
+        }
+      }
+    },
+    {
+      "name": "Farm 4",
+      "emu_index": 4,
+      "port": 21533,
+      "enabled": false,
+      "tasks": {
+        "daily_tasks": {
+          "enabled": false,
+          "collect_idle_reward": false,
+          "collect_free_rewards": false,
+          "collect_vip_rewards": false,
+          "collect_radar": true,
+          "complete_radar": true,
+          "Collect Fuel": false,
+          "Read Mail": true,
+          "collect_recruits": false
+        },
+        "rally": {
+          "enabled": false,
+          "quick_join_rally": false,
+          "create_rally": true,
+          "boomer_level": 5,
+          "use_max_formations": true,
+          "max_rallies_per_day": 6
+        },
+        "gathering": {
+          "enabled": true,
+          "collect_wood": true,
+          "collect_food": true,
+          "collect_electricity": false,
+          "collect_zents": false,
+          "resource_site_level": 6,
+          "max_formations": 3
+        }
+      }
+    },
+    {
+      "name": "Farm 5",
+      "emu_index": 5,
+      "port": 21543,
+      "enabled": false,
+      "tasks": {
+        "daily_tasks": {
+          "enabled": false,
+          "collect_idle_reward": false,
+          "collect_free_rewards": false,
+          "collect_vip_rewards": false,
+          "collect_radar": true,
+          "complete_radar": true,
+          "Collect Fuel": false,
+          "Read Mail": true,
+          "collect_recruits": false
+        },
+        "rally": {
+          "enabled": false,
+          "quick_join_rally": false,
+          "create_rally": true,
+          "boomer_level": 5,
+          "use_max_formations": true,
+          "max_rallies_per_day": 6
+        },
+        "gathering": {
+          "enabled": true,
+          "collect_wood": true,
+          "collect_food": true,
+          "collect_electricity": false,
+          "collect_zents": false,
+          "resource_site_level": 6,
+          "max_formations": 3
+        }
+      }
+    }
+  ],
+  "bot_settings": {
+    "emulator": "MEmu",
+    "memu_path": "C:\\Program Files\\Microvirt\\MEmu",
+    "force_kill_hung": true,
+    "auto_run_startup": false,
+    "max_farm_timeout": 40,
+    "emulator_boot_timeout": 180,
+    "game_load_wait": "40",
+    "post_launch_wait": "20",
+    "vision_confidence": "0.8",
+    "retry_failed": true,
+    "max_retries": 2,
+    "loop_tasks": false,
+    "loop_delay": 60.0,
+    "screenshot_on_error": true,
+    "auto_arrange": true
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "collect_idle_reward",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "x_pct": 91.1,
+      "y_pct": 95.6,
+      "note": "Verify we are in HQ view before starting"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_Idle_reward.png",
+      "required": false,
+      "skip_task_if_not_found": true,
+      "log_success": "Idle Reward chest found \u00e2\u20ac\u201d opening dialog",
+      "log_skip": "Idle Reward not available \u00e2\u20ac\u201d skipping"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 50.2,
+      "y_pct": 74.2,
+      "note": "Tap green Collect button"
+    },
+    {
+      "action": "wait",
+      "seconds": 1.0
+    },
+    {
+      "action": "press_back",
+      "required": false
+    }
+  ]
+}

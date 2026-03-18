@@ -1,0 +1,63 @@
+{
+  "name": "collect_radar",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "x_pct": 91.1,
+      "y_pct": 95.6,
+      "note": "Verify we are in HQ view before starting"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_radar_collect_present.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_radar_to_collect.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all.png",
+      "required": false,
+      "log_success": "Radar rewards found \u00e2\u20ac\u201d claiming all",
+      "log_skip": "No radar rewards to claim \u00e2\u20ac\u201d continuing"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_clear.png",
+      "required": false,
+      "note": "Clear any popup"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "tap_template",
+      "template": "btn_back.png",
+      "timeout": 10,
+      "required": false,
+      "note": "Go back"
+    }
+  ]
+}

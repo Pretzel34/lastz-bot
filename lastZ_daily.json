@@ -1,0 +1,183 @@
+{
+  "name": "Last Z - Daily Routine",
+  "description": "Collects resources, claims daily rewards, trains troops, and manages buildings",
+  "tasks": [
+    {
+      "name": "Launch Game",
+      "actions": [
+        {
+          "action": "launch_app",
+          "package": "com.im30.lastz",
+          "note": "Launch Last Z — update package name if different"
+        },
+        {
+          "action": "wait_for_template",
+          "template": "nav_world.png",
+          "timeout": 60,
+          "note": "Wait for main base screen to fully load"
+        },
+        {
+          "action": "wait",
+          "seconds": 2
+        }
+      ]
+    },
+    {
+      "name": "Dismiss Popups",
+      "actions": [
+        {
+          "action": "if_template_tap",
+          "template": "btn_event_gift.png",
+          "note": "Dismiss any gift/event popup if present",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 1
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_hot_events.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 1
+        }
+      ]
+    },
+    {
+      "name": "Collect Mail Rewards",
+      "actions": [
+        {
+          "action": "tap_template",
+          "template": "nav_mail.png",
+          "timeout": 10,
+          "note": "Open mail"
+        },
+        {
+          "action": "wait",
+          "seconds": 2
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_collect_all.png",
+          "note": "Collect all mail rewards — add this template once you screenshot the button",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 2
+        },
+        {
+          "action": "press_back",
+          "note": "Close mail"
+        },
+        {
+          "action": "wait",
+          "seconds": 1
+        }
+      ]
+    },
+    {
+      "name": "Train Troops",
+      "actions": [
+        {
+          "action": "tap_template",
+          "template": "btn_troops.png",
+          "timeout": 10,
+          "note": "Open troop training panel"
+        },
+        {
+          "action": "wait",
+          "seconds": 2
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_train_max.png",
+          "note": "Tap train max / fill queue — add template once you screenshot it",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 1
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_confirm.png",
+          "required": false
+        },
+        {
+          "action": "press_back",
+          "note": "Close troop panel"
+        },
+        {
+          "action": "wait",
+          "seconds": 1
+        }
+      ]
+    },
+    {
+      "name": "Auto Battle / Farm",
+      "actions": [
+        {
+          "action": "tap_template",
+          "template": "btn_fight.png",
+          "timeout": 10,
+          "note": "Open fight/battle screen"
+        },
+        {
+          "action": "wait",
+          "seconds": 3
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_auto_battle.png",
+          "note": "Start auto battle if available",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 2
+        },
+        {
+          "action": "press_back"
+        },
+        {
+          "action": "wait",
+          "seconds": 1
+        }
+      ]
+    },
+    {
+      "name": "Daily Quests",
+      "actions": [
+        {
+          "action": "tap",
+          "x": 25,
+          "y": 660,
+          "note": "Tap daily quest / achievement button on left side"
+        },
+        {
+          "action": "wait",
+          "seconds": 2
+        },
+        {
+          "action": "repeat_if_template",
+          "template": "btn_claim.png",
+          "max_taps": 15,
+          "delay": 1.0,
+          "note": "Keep claiming quest rewards until none left",
+          "required": false
+        },
+        {
+          "action": "press_back"
+        },
+        {
+          "action": "wait",
+          "seconds": 1
+        }
+      ]
+    }
+  ]
+}

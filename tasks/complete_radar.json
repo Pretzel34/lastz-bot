@@ -1,0 +1,213 @@
+{
+  "name": "complete_radar",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "x_pct": 91.1,
+      "y_pct": 95.6,
+      "note": "Verify we are in HQ view before starting"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 5.7,
+      "y_pct": 74.6,
+      "note": "Open Radar"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all.png",
+      "required": false,
+      "note": "Claim all pending rewards if present"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_radar_task_completed.png",
+      "required": false,
+      "note": "Dismiss task completed banner after claiming"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "loop_until_template",
+      "any_of": ["btn_empty_radar_1.png", "btn_empty_radar_2.png"],
+      "max_iterations": 50,
+      "note": "Keep completing radar tasks until the radar is empty",
+      "on_each": [
+        {
+          "action": "if_template_tap",
+          "template": "btn_radar_task_completed.png",
+          "required": false,
+          "note": "Dismiss any task completed banner"
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_claim_all.png",
+          "required": false,
+          "note": "Claim any newly completed rewards"
+        },
+        {
+          "action": "wait",
+          "seconds": 2.0
+        },
+        {
+          "action": "tap_if_slots_available",
+          "template": "btn_go_help_ally.png",
+          "required": false,
+          "note": "PRIORITY 1 — navigate to ally only if a slot is free, abort task if all full"
+        },
+        {
+          "action": "wait",
+          "seconds": 4.0
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_help_ally.png",
+          "required": false,
+          "note": "Help the ally (standard button)"
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_help_ally_alt.png",
+          "required": false,
+          "note": "Help the ally (alternate button)"
+        },
+        {
+          "action": "tap_if_slots_available",
+          "template": "btn_radar_gather.png",
+          "required": false,
+          "note": "Gather only if a formation slot is free"
+        },
+        {
+          "action": "tap_if_slots_available",
+          "template": "btn_radar_attack.png",
+          "required": false,
+          "note": "Attack only if a formation slot is free"
+        },
+        {
+          "action": "wait",
+          "seconds": 2.0
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_march.png",
+          "required": false,
+          "note": "Confirm march after gather or attack"
+        },
+        {
+          "action": "wait",
+          "seconds": 2.0
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_assist_ally.png",
+          "required": false,
+          "note": "Tap an assist ally task if visible — executes immediately, no march needed"
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_radar_area_cleansing.png",
+          "required": false,
+          "note": "Tap area cleansing task if visible"
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_rescue_survivors_radar.png",
+          "required": false,
+          "note": "Tap rescue survivors task if visible"
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_area_cleansing_gray_radar.png",
+          "required": false,
+          "note": "Tap gray area cleansing task if visible"
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_food_contest_radar.png",
+          "required": false,
+          "note": "Tap food contest task if visible"
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_zent_contest_radar.png",
+          "required": false,
+          "note": "Tap zent contest task if visible"
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_plunder_resources_blue.png",
+          "required": false,
+          "note": "Tap blue plunder resources task if visible"
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_purple_skull_pin_radar.png",
+          "required": false,
+          "note": "Tap purple skull pin radar task if visible"
+        },
+        {
+          "action": "wait",
+          "seconds": 2.0
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_march.png",
+          "required": false,
+          "note": "Confirm march for any area task that showed a march button"
+        },
+        {
+          "action": "press_back",
+          "note": "Dismiss any open in-progress popup before returning — prevents stale panels from causing a loop"
+        },
+        {
+          "action": "wait",
+          "seconds": 1.0
+        },
+        {
+          "action": "ensure_hq_view",
+          "hq_btn": "btn_go_world.png",
+          "world_btn": "btn_go_headquarters.png",
+          "x_pct": 91.1,
+          "y_pct": 95.6,
+          "note": "Return camera to HQ so all radar items are visible"
+        },
+        {
+          "action": "wait",
+          "seconds": 3.0
+        },
+        {
+          "action": "tap_zone",
+          "x_pct": 5.7,
+          "y_pct": 74.6,
+          "note": "Re-open Radar"
+        },
+        {
+          "action": "wait",
+          "seconds": 4.0
+        }
+      ]
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 91.3,
+      "y_pct": 95.6,
+      "note": "Final return to base"
+    }
+  ]
+}

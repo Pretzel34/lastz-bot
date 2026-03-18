@@ -1,0 +1,95 @@
+{
+  "name": "gather_power",
+  "actions": [
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_to_world_view.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "check_formations_busy",
+      "slots": [
+        {"x_pct": 92.6, "y_pct": 51.0},
+        {"x_pct": 92.8, "y_pct": 56.9},
+        {"x_pct": 92.6, "y_pct": 62.5},
+        {"x_pct": 92.8, "y_pct": 68.0}
+      ],
+      "locked_template": "btn_fourth_formation_locked.png",
+      "note": "Exit early if all formation slots are occupied"
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_search_lens_icon.png",
+      "x_pct": 5.2,
+      "y_pct": 80.7,
+      "note": "Open search - tap template if found, else tap search icon"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "find_template_with_scroll",
+      "template": "btn_gather_power.png",
+      "scroll_x_pct": 70.6,
+      "scroll_y_pct": 67.4,
+      "log_not_found": "Power not found - no power resource visible after scrolling"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "search_resource_level",
+      "resource_template": "btn_gather_power.png",
+      "scroll_x_pct": 70.6,
+      "scroll_y_pct": 67.4,
+      "template_pattern": "btn_resource_lvl_{value}.png",
+      "plus_template": "btn_plus_boomer.png",
+      "minus_template": "btn_subtract_boomer_lvl.png",
+      "max_level": 6,
+      "note": "Set level, search, tap result — step up if no resource found at current level"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_free_formation",
+      "slots": [
+        {"x_pct": 92.6, "y_pct": 51.0},
+        {"x_pct": 92.8, "y_pct": 56.9},
+        {"x_pct": 92.6, "y_pct": 62.5},
+        {"x_pct": 92.8, "y_pct": 68.0}
+      ],
+      "locked_template": "btn_fourth_formation_locked.png",
+      "log_all_busy": "All formations busy or returning - skipping gather"
+    },
+    {
+      "action": "wait",
+      "seconds": 1.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_march.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_to_hq_view.png",
+      "required": false
+    }
+  ]
+}

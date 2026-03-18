@@ -1,0 +1,46 @@
+{
+  "name": "identify_resources",
+  "actions": [
+    {
+      "action": "if_template_tap",
+      "template": "btn_warehouse.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_statistics.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "read_resource_priority",
+      "anchor_template": "btn_resource_example.png",
+      "note": "Screenshot the resource panel, rank by Total RSS ascending, save to logs/resource_priority.json"
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_close.png",
+      "x_pct": 83.1,
+      "y_pct": 18.6,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_back_out_of_page.png",
+      "x_pct": 7.4,
+      "y_pct": 94.9,
+      "required": false
+    }
+  ]
+}

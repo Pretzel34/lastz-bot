@@ -1,0 +1,54 @@
+{
+  "name": "refill_fuel_on_formation",
+  "actions": [
+    {
+      "action": "if_template_tap",
+      "template": "btn_replenish_fuel.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 74.6,
+      "y_pct": 61.3,
+      "note": "Use Item"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 73.9,
+      "y_pct": 54.5,
+      "note": "Refill Button"
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_refill_fuel.png",
+      "x_pct": 73.9,
+      "y_pct": 54.5,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 50.0,
+      "y_pct": 60.7,
+      "note": "Use to refill"
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_use_to_refill.png",
+      "x_pct": 50.0,
+      "y_pct": 60.7,
+      "required": false
+    }
+  ]
+}

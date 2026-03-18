@@ -1,0 +1,94 @@
+{
+  "name": "collect_free_rewards",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "x_pct": 91.1,
+      "y_pct": 95.6,
+      "note": "Verify we are in HQ view before starting"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "tap_template",
+      "template": "btn_collect_freebies_top_right.png",
+      "timeout": 10,
+      "skip_task_if_not_found": true,
+      "log_skip": "Freebies panel not available — skipping",
+      "note": "Open freebies panel"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_daily_sale.png",
+      "required": false,
+      "note": "Tap Daily Sale tab if visible"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_daily_freebies.png",
+      "required": false,
+      "skip_task_if_not_found": false,
+      "note": "Tap Daily Freebies tab if visible"
+    },
+    {
+      "action": "check_claimed",
+      "claimed_template": "btn_claimed_reward.png",
+      "claimed_message": "Free Rewards already claimed — skipping",
+      "note": "If daily freebies not found, check if already claimed"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "scroll_right",
+      "steps": 1,
+      "distance_pct": 50,
+      "start_x_pct": 80.0,
+      "start_y_pct": 92.0,
+      "note": "Scroll tab bar right"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_super_supplies.png",
+      "required": false,
+      "note": "Tap Super Supplies if visible"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 8.1,
+      "y_pct": 23.1,
+      "note": "Free Supplies button"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_clear_message.png",
+      "required": false,
+      "note": "Clear any message popup"
+    }
+  ]
+}

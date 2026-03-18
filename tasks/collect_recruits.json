@@ -1,0 +1,54 @@
+{
+  "name": "collect_recruits",
+  "actions": [
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_headquarters.png",
+      "required": false,
+      "note": "If in world view, return to HQ. If already in HQ, skip."
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_collect_recruit.png",
+      "required": false,
+      "skip_task_if_not_found": true,
+      "log_skip": "btn_collect_recruit not found — recruits already collected, ending task",
+      "note": "Gate: if recruit button is not present, end the task cleanly"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "repeat_if_template",
+      "template": "btn_claim_recruit.png",
+      "max_attempts": 20,
+      "note": "Loop: claim each recruit until none remain",
+      "on_each": [
+        {
+          "action": "if_template_tap",
+          "template": "btn_claim_recruit.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 6.0
+        },
+        {
+          "action": "tap_zone",
+          "x_pct": 20.6,
+          "y_pct": 65.8,
+          "note": "Click away from recruit"
+        },
+        {
+          "action": "wait",
+          "seconds": 3.0
+        }
+      ]
+    }
+  ]
+}

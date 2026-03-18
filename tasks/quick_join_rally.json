@@ -1,0 +1,121 @@
+{
+  "name": "quick_join_rally",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "x_pct": 91.1,
+      "y_pct": 95.6,
+      "note": "Verify we are in HQ view before starting"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 92.8,
+      "y_pct": 8.0,
+      "note": "Event Center"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "scroll_right",
+      "steps": 1,
+      "distance_pct": 75,
+      "start_x_pct": 80.0,
+      "start_y_pct": 92.0,
+      "note": "Attempt 1 — scroll tab bar right (increased distance)"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "scroll_left",
+      "steps": 1,
+      "distance_pct": 60,
+      "start_x_pct": 20.0,
+      "start_y_pct": 92.0,
+      "note": "Recovery — scroll left to reset"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "scroll_right",
+      "steps": 1,
+      "distance_pct": 85,
+      "start_x_pct": 80.0,
+      "start_y_pct": 92.0,
+      "note": "Attempt 2 — scroll right with larger distance"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_template",
+      "template": "btn_boomer_tab.png",
+      "timeout": 5,
+      "required": true,
+      "note": "Must find boomer tab — error out if still not visible after scroll retries"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_aut_team_boomer.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_activate_boomer_rally.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_close_auto_team_up_boomer.png",
+      "required": false,
+      "note": "Close auto team-up dialog if present"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 50.0,
+      "y_pct": 50.0,
+      "note": "Fallback dismiss tap if close button was not found"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_back.png",
+      "required": false
+    }
+  ]
+}

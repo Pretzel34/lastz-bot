@@ -1,0 +1,8 @@
+{
+  "name": "startup_dismiss",
+  "actions": [
+    {"action": "wait", "seconds": 2},
+    {"action": "tap_zone", "x_pct": 15.0, "y_pct": 15.0, "note": "Dismiss popup"},
+    {"action": "wait", "seconds": 1}
+  ]
+}
