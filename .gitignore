@@ -21,6 +21,7 @@ logs/
 .vscode/
 .idea/
 *.swp
+*.swo
 
 # OS
 .DS_Store
@@ -32,3 +33,16 @@ Thumbs.db
 # Temporary
 *.tmp
 *~
+.cache/
+
+# User data / config (local)
+farms.json
+config.json
+
+# Test screenshots / debug files
+test_screenshot.png
+debug_vision.png
+_debug_formation.png
+
+# pycache in specific locations
+bot/__pycache__/

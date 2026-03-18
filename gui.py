@@ -29,10 +29,10 @@ from paths import ensure_app_dir, get_farms_path
 from updater import check_for_update, download_and_launch
 
 # Update these values for your repository.
-GITHUB_OWNER = "YOUR_GITHUB_USER"
-GITHUB_REPO = "YOUR_REPO_NAME"
+GITHUB_OWNER = "Pretzel34"
+GITHUB_REPO = "lastz-bot"
 # The substring to match inside the GitHub release asset name.
-# Example: "setup" will match "Bot-Setup-0.1.0.exe".
+# Example: "LastZBot-0.1.0.exe" will be matched by "LastZBot".
 UPDATE_ASSET_NAME_CONTAINS = "LastZBot"
 
 MEMUC_PATH = r"C:\Program Files\Microvirt\MEmu\memuc.exe"
