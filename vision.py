@@ -85,15 +85,18 @@ class VisionEngine:
         result = vision.wait_for_template(bot, "templates/main_menu.png", timeout=15)
     """
 
-    def __init__(self, confidence_threshold: float = 0.8):
+    def __init__(self, confidence_threshold: float = 0.8, canonical_size: tuple = (540, 960)):
         """
         confidence_threshold: minimum match confidence (0.0–1.0).
-        0.8 is a good default. Lower it if templates aren't matching.
-        Raise it if you get false positives.
+        canonical_size: (width, height) that templates were captured at.
+                        Screenshots larger than this are auto-scaled down before
+                        matching, and result coordinates are scaled back up.
         """
         self.confidence_threshold = float(confidence_threshold)
+        self.canonical_size = canonical_size
         self._ocr_reader = None  # lazy-loaded on first use
         self.templates: dict[str, np.ndarray] = {}  # cache loaded templates
+        self._logged_scale = False  # only log scaling once per session
 
     # ------------------------------------------------------------------
     # Template Matching — find a button/image on screen
@@ -126,13 +129,15 @@ class VisionEngine:
         """
         threshold = threshold or self.confidence_threshold
 
-        # Convert screenshot to OpenCV format
-        screen_cv = self._pil_to_cv(screenshot)
+        # Normalize screenshot to canonical size for template matching
+        norm_screen, sx, sy = self._normalize_screenshot(screenshot)
+        screen_cv = self._pil_to_cv(norm_screen)
 
-        # Crop to region if specified
+        # Crop to region if specified (scale region to canonical space)
         offset_x, offset_y = 0, 0
         if region:
-            x1, y1, x2, y2 = region
+            x1, y1, x2, y2 = (int(region[0]/sx), int(region[1]/sy),
+                               int(region[2]/sx), int(region[3]/sy))
             screen_cv = screen_cv[y1:y2, x1:x2]
             offset_x, offset_y = x1, y1
 
@@ -149,19 +154,19 @@ class VisionEngine:
         if max_val < threshold:
             return MatchResult(found=False, confidence=max_val)
 
-        # Calculate center coordinates
+        # Calculate center coordinates in canonical space, then scale back to original
         th, tw = template_cv.shape[:2]
-        cx = max_loc[0] + tw // 2 + offset_x
-        cy = max_loc[1] + th // 2 + offset_y
-        x1 = max_loc[0] + offset_x
-        y1 = max_loc[1] + offset_y
+        cx = int((max_loc[0] + tw // 2 + offset_x) * sx)
+        cy = int((max_loc[1] + th // 2 + offset_y) * sy)
+        x1 = int((max_loc[0] + offset_x) * sx)
+        y1 = int((max_loc[1] + offset_y) * sy)
 
         return MatchResult(
             found=True,
             x=cx,
             y=cy,
             confidence=max_val,
-            region=(x1, y1, x1 + tw, y1 + th),
+            region=(x1, y1, int(x1 + tw * sx), int(y1 + th * sy)),
         )
 
     def find_all_templates(
@@ -179,7 +184,8 @@ class VisionEngine:
         Returns list of MatchResult sorted by confidence (highest first).
         """
         threshold = threshold or self.confidence_threshold
-        screen_cv = self._pil_to_cv(screenshot)
+        norm_screen, sx, sy = self._normalize_screenshot(screenshot)
+        screen_cv = self._pil_to_cv(norm_screen)
         template_cv = self._load_template(template_path)
 
         if template_cv is None:
@@ -192,14 +198,15 @@ class VisionEngine:
         matches = []
 
         for pt in zip(*locations[::-1]):  # x, y pairs
-            cx = pt[0] + tw // 2
-            cy = pt[1] + th // 2
+            cx = int((pt[0] + tw // 2) * sx)
+            cy = int((pt[1] + th // 2) * sy)
             conf = result[pt[1], pt[0]]
             matches.append(MatchResult(
                 found=True,
                 x=cx, y=cy,
                 confidence=float(conf),
-                region=(pt[0], pt[1], pt[0] + tw, pt[1] + th),
+                region=(int(pt[0]*sx), int(pt[1]*sy),
+                        int((pt[0]+tw)*sx), int((pt[1]+th)*sy)),
             ))
 
         # Non-maximum suppression — remove overlapping duplicates
@@ -319,13 +326,16 @@ class VisionEngine:
         """
         self._ensure_ocr()
 
-        img = screenshot
+        norm_screen, sx, sy = self._normalize_screenshot(screenshot)
+        img = norm_screen
         offset_x, offset_y = 0, 0
 
         if region:
-            x1, y1, x2, y2 = region
-            img = screenshot.crop((x1, y1, x2, y2))
-            offset_x, offset_y = x1, y1
+            # Scale region to canonical space
+            rx1, ry1, rx2, ry2 = (int(region[0]/sx), int(region[1]/sy),
+                                   int(region[2]/sx), int(region[3]/sy))
+            img = norm_screen.crop((rx1, ry1, rx2, ry2))
+            offset_x, offset_y = rx1, ry1
 
         img_np = np.array(img)
         raw_results = self._ocr_reader.readtext(img_np)
@@ -337,12 +347,13 @@ class VisionEngine:
             # bbox is [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
             xs = [p[0] for p in bbox]
             ys = [p[1] for p in bbox]
-            cx = int(sum(xs) / 4) + offset_x
-            cy = int(sum(ys) / 4) + offset_y
-            x1r = int(min(xs)) + offset_x
-            y1r = int(min(ys)) + offset_y
-            x2r = int(max(xs)) + offset_x
-            y2r = int(max(ys)) + offset_y
+            # Scale coordinates back to original screenshot space
+            cx = int((sum(xs) / 4 + offset_x) * sx)
+            cy = int((sum(ys) / 4 + offset_y) * sy)
+            x1r = int((min(xs) + offset_x) * sx)
+            y1r = int((min(ys) + offset_y) * sy)
+            x2r = int((max(xs) + offset_x) * sx)
+            y2r = int((max(ys) + offset_y) * sy)
 
             ocr_results.append(OCRResult(
                 text=text.strip(),
@@ -532,6 +543,22 @@ class VisionEngine:
     # ------------------------------------------------------------------
     # Private Helpers
     # ------------------------------------------------------------------
+
+    def _normalize_screenshot(self, screenshot: Image.Image):
+        """
+        Scale screenshot to canonical_size if needed.
+        Returns (scaled_image, scale_x, scale_y) where scale factors
+        convert canonical coords back to original screenshot coords.
+        """
+        w, h = screenshot.size
+        cw, ch = self.canonical_size
+        if (w, h) == (cw, ch):
+            return screenshot, 1.0, 1.0
+        if not self._logged_scale:
+            print(f"[Vision] Auto-scaling screenshots {w}x{h} → {cw}x{ch} for template matching")
+            self._logged_scale = True
+        scaled = screenshot.resize((cw, ch), Image.LANCZOS)
+        return scaled, w / cw, h / ch
 
     def _pil_to_cv(self, img: Image.Image) -> np.ndarray:
         """Convert PIL Image to OpenCV numpy array (RGB)."""

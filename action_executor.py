@@ -17,6 +17,7 @@ from enum import Enum
 
 from adb_wrapper import ADBWrapper
 from vision import VisionEngine, MatchResult
+from paths import get_resource_dir
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +86,7 @@ class ActionExecutor:
         log_callback: Optional[Callable[[str], None]] = None,
         farm_settings: Optional[dict] = None,
         stop_event=None,
+        emulator_type: str = "MEmu",
     ):
         self.bot = bot
         self.vision = vision
@@ -95,6 +97,7 @@ class ActionExecutor:
         self._stop_event = stop_event  # threading.Event from BotEngine, or None
         self._formations_sent = 0      # tracks how many gather formations have been dispatched this session
         self._used_slot_indices: set = set()  # slot indices already tapped this session (0-based)
+        self.emulator_type = emulator_type
 
     def set_farm_settings(self, settings: dict):
         """Update farm task settings (e.g. rally.boomer_level). Called by BotEngine before each task."""
@@ -135,6 +138,9 @@ class ActionExecutor:
                 "timeout": 10
             })
         """
+        if self._stop_event and self._stop_event.is_set():
+            return ActionResult(status=ActionStatus.SKIPPED, action=action, message="Bot stopped")
+
         action = self._normalize(action)
         action_type = action.get("action", "").strip()
         if not action_type:
@@ -186,6 +192,7 @@ class ActionExecutor:
             "wait_for_template_gone":   self._wait_for_template_gone,
             "screenshot":               self._screenshot,
             "if_template_tap":          self._if_template_tap,
+            "if_template_found":        self._if_template_found,
             "tap_if_slots_available":   self._tap_if_slots_available,
             "check_formations_busy":    self._check_formations_busy,
             "tap_template_or_zone":     self._tap_template_or_zone,
@@ -196,6 +203,8 @@ class ActionExecutor:
             "repeat_if_template":       self._repeat_if_template,
             "verify_setting_template":  self._verify_setting_template,
             "adjust_boomer_level":      self._adjust_boomer_level,
+            "adjust_boomer_level_ocr":  self._adjust_boomer_level_ocr,
+            "adjust_boomer_level_from_one": self._adjust_boomer_level_from_one,
             "adjust_resource_level":    self._adjust_resource_level,
             "search_resource_level":    self._search_resource_level,
             "compare_resources":        self._compare_resources,
@@ -389,7 +398,7 @@ class ActionExecutor:
         import time, json as _json
         from pathlib import Path
 
-        seq_path = Path("tasks") / "center_hq.json"
+        seq_path = get_resource_dir() / "tasks" / "center_hq.json"
 
         if seq_path.exists():
             try:
@@ -489,14 +498,20 @@ class ActionExecutor:
 
     def _zoom_out(self, action: dict) -> ActionResult:
         """
-        Zoom out using MEmu F3 shortcut.
-        Enumerates all windows, logs them, focuses MEmu, sends F3.
+        Zoom out using the emulator's zoom shortcut key.
+        Finds the correct emulator window by port→index mapping, then sends the key.
         """
         import time
         import ctypes
         from ctypes import wintypes
+        from launcher import get_profile, port_to_index
 
-        steps = int(action.get("steps", 3))
+        profile   = get_profile(self.emulator_type)
+        zoom_key  = profile.get("zoom_key")
+        if not zoom_key:
+            return self._fail(action, f"zoom_out: {self.emulator_type} has no zoom key configured")
+
+        steps  = int(action.get("steps", 3))
         user32 = ctypes.windll.user32
 
         # Enumerate ALL visible windows for debug
@@ -512,22 +527,21 @@ class ActionExecutor:
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
         user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
 
+        bare_title = profile["window_title_bare"]
         if self.log_callback:
             self.log_callback(f"zoom_out: visible windows found: {len(all_windows)}")
             for h, t in all_windows:
-                if any(k in t for k in ["MEmu", "Last", "Play", "MicroVirt"]):
+                if bare_title in t or any(k in t for k in ["Last", "Play"]):
                     self.log_callback(f"  >> hwnd={h}  title='{t}'")
 
-        # Find the correct MEmu instance window — prefer "(MEmu - N)" over bare "MEmu"
-        # The instance windows are titled "(MEmu - 1)", "(MEmu - 2)", etc.
-        # We match by ADB port: port 21503 = index 0 = MEmu-1, etc.
         hwnd, title = None, ""
 
-        # Try to match by bot port → instance number
+        # Try to match the exact instance window using port → 1-based index
         try:
-            port = self.bot.port if hasattr(self.bot, "port") else 21503
-            index = (port - 21503) // 2 + 1  # 21503→1, 21505→2, etc.
-            target_title = f"(MEmu - {index})"
+            port  = self.bot.port if hasattr(self.bot, "port") else profile["port_base"]
+            index = port_to_index(port, self.emulator_type)   # 0-based
+            n     = index + 1                                  # 1-based for title
+            target_title = profile["window_title"].format(n=n)
             for h, t in all_windows:
                 if t == target_title:
                     hwnd, title = h, t
@@ -535,26 +549,19 @@ class ActionExecutor:
         except Exception:
             pass
 
-        # Fallback: first "(MEmu - N)" window found
+        # Fallback: any window whose title starts with the bare title
         if not hwnd:
             for h, t in all_windows:
-                if t.startswith("(MEmu - "):
-                    hwnd, title = h, t
-                    break
-
-        # Last resort: bare "MEmu"
-        if not hwnd:
-            for h, t in all_windows:
-                if t == "MEmu":
+                if t == bare_title or t.startswith(bare_title):
                     hwnd, title = h, t
                     break
 
         if not hwnd:
             if self.log_callback:
-                self.log_callback("zoom_out: no MEmu window found — all titles:")
+                self.log_callback(f"zoom_out: no {self.emulator_type} window found — all titles:")
                 for h, t in all_windows[:20]:
                     self.log_callback(f"    hwnd={h} '{t}'")
-            return self._fail(action, "zoom_out: MEmu window not found")
+            return self._fail(action, f"zoom_out: {self.emulator_type} window not found")
 
         if self.log_callback:
             self.log_callback(f"zoom_out: targeting '{title}' hwnd={hwnd}")
@@ -569,18 +576,16 @@ class ActionExecutor:
         if self.log_callback:
             self.log_callback(f"zoom_out: foreground hwnd={focused} (expected {hwnd}) match={focused==hwnd}")
 
-        # Send F3
+        # Send zoom key
         try:
             import pyautogui
             pyautogui.FAILSAFE = False
             for i in range(steps):
-                pyautogui.press('f3')
+                pyautogui.press(zoom_key)
                 if self.log_callback:
-                    self.log_callback(f"zoom_out: sent F3 ({i+1}/{steps})")
+                    self.log_callback(f"zoom_out: sent {zoom_key.upper()} ({i+1}/{steps})")
                 time.sleep(0.4)
-            return self._ok(action, f"zoom_out: F3 x{steps} → '{title}'")
-        except ImportError:
-            return self._fail(action, "zoom_out: pyautogui not installed")
+            return self._ok(action, f"zoom_out: {zoom_key.upper()} x{steps} → '{title}'")
         except ImportError:
             return self._fail(action, "zoom_out: pyautogui not installed — run: pip install pyautogui")
 
@@ -673,9 +678,18 @@ class ActionExecutor:
         self.bot.stop_app(package)
         return self._ok(action, f"Stopped {package}")
 
+    def _interruptible_sleep(self, seconds: float) -> bool:
+        """Sleep for up to `seconds`. Returns True immediately if stop is requested."""
+        if self._stop_event:
+            return self._stop_event.wait(timeout=seconds)
+        time.sleep(seconds)
+        return False
+
     def _wait(self, action: dict) -> ActionResult:
         seconds = float(action.get("seconds", 1.0))
-        time.sleep(seconds)
+        stopped = self._interruptible_sleep(seconds)
+        if stopped:
+            return self._ok(action, f"Wait interrupted by stop request")
         return self._ok(action, f"Waited {seconds}s")
 
     def _wait_for_template(self, action: dict) -> ActionResult:
@@ -785,38 +799,58 @@ class ActionExecutor:
                 self.log_callback(f"  ✓ {msg}")
             return self._ok(action, msg)
 
-        # Not found
+        # Not found — check for fuel-empty fallback before giving up
+        fuel_template = action.get("fuel_template")
+        if fuel_template:
+            fuel_path = self._template_path(fuel_template)
+            fuel_match = self.vision.find_template(screenshot, fuel_path)
+            if fuel_match:
+                if self.log_callback:
+                    self.log_callback(f"  ⛽ '{fuel_template}' detected — running restore_fuel")
+                import json as _json
+                from pathlib import Path
+                fuel_task_path = get_resource_dir() / "tasks" / "restore_fuel.json"
+                if fuel_task_path.exists():
+                    try:
+                        fuel_task = _json.loads(fuel_task_path.read_text(encoding="utf-8"))
+                        for sub_action in fuel_task.get("actions", []):
+                            self.execute(sub_action)
+                    except Exception as e:
+                        if self.log_callback:
+                            self.log_callback(f"  ⚠ restore_fuel failed: {e}")
+                # Retry the march tap after refuelling
+                screenshot2 = self.bot.screenshot()
+                for tmpl in templates_to_try:
+                    path = self._template_path(tmpl)
+                    retry_match = self.vision.find_template(screenshot2, path, threshold=threshold)
+                    if retry_match:
+                        self.bot.tap(retry_match.x, retry_match.y)
+                        msg = action.get("log_success", f"Found and tapped '{tmpl}' after refuelling")
+                        if self.log_callback:
+                            self.log_callback(f"  ✓ {msg}")
+                        return self._ok(action, msg)
+                if self.log_callback:
+                    self.log_callback(f"  ✗ March still not found after restore_fuel")
+
         skip_task     = action.get("skip_task_if_not_found", False)
         exhaust_rallies = action.get("exhaust_rallies_if_not_found", False)
+        on_not_found  = action.get("on_not_found", [])
         skip_msg      = action.get("log_skip", f"'{template}' not found — skipping task")
         if self.log_callback:
             self.log_callback(f"  ⏭ {skip_msg}")
 
         if exhaust_rallies:
-            # Set counter to max so all future rally_count_check calls abort
-            import json as _json
-            from pathlib import Path
-            from datetime import date
-            rally_cfg   = self.farm_settings.get("rally", {})
-            max_rallies = int(rally_cfg.get("max_rallies_per_day", 999))
-            port        = getattr(self.bot, "port", 0)
-            key         = f"{port}_{date.today()}"
-            counts_path = Path("logs/rally_counts.json")
-            counts: dict = {}
-            if counts_path.exists():
-                try:
-                    with open(counts_path) as f:
-                        counts = _json.load(f)
-                except Exception:
-                    counts = {}
-            counts[key] = max_rallies
-            Path("logs").mkdir(exist_ok=True)
-            with open(counts_path, "w") as f:
-                _json.dump(counts, f, indent=2)
-            msg = f"Troops busy — rally counter exhausted ({max_rallies}/{max_rallies}), stopping all rallies"
+            msg = "Troops busy — march not available, skipping rally attempt"
             if self.log_callback:
-                self.log_callback(f"  🛑 {msg}")
+                self.log_callback(f"  ⏭ {msg}")
             return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+
+        if on_not_found:
+            for sub in on_not_found:
+                if self._stop_event and self._stop_event.is_set():
+                    break
+                self.execute(sub)
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=skip_msg)
 
         if skip_task:
             return ActionResult(
@@ -829,6 +863,41 @@ class ActionExecutor:
             action=action,
             message=skip_msg,
         )
+
+    def _if_template_found(self, action: dict) -> ActionResult:
+        """
+        Detect whether a template is visible WITHOUT tapping it.
+        If found: log, execute on_found sub-actions, then abort the current task
+                  so remaining steps are skipped.
+        If not found: return SKIPPED and continue normally.
+
+        Required: template
+        Optional: log_found   — message logged when template is detected
+                  log_skip    — message logged when template is absent
+                  on_found    — list of action dicts to execute when template is visible
+        """
+        template = action.get("template")
+        if not template:
+            return self._fail(action, "if_template_found requires 'template'")
+
+        screenshot = self.bot.screenshot()
+        path = self._template_path(template)
+        match = self.vision.find_template(screenshot, path)
+
+        if match:
+            msg = action.get("log_found", f"'{template}' detected")
+            if self.log_callback:
+                self.log_callback(f"  ✓ {msg}")
+            for sub in action.get("on_found", []):
+                if self._stop_event and self._stop_event.is_set():
+                    break
+                self.execute(sub)
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+
+        skip_msg = action.get("log_skip", f"'{template}' not visible — continuing")
+        if self.log_callback:
+            self.log_callback(f"  ⏭ {skip_msg}")
+        return ActionResult(status=ActionStatus.SKIPPED, action=action, message=skip_msg)
 
     # ------------------------------------------------------------------
     # Resource comparison
@@ -1240,7 +1309,7 @@ class ActionExecutor:
             # No slots provided — skip slot scan, proceed
             return self._ok(action, "Formations available (no slot scan)")
 
-        timer_re      = _re.compile(r'[A-Za-z0-9]{2,}[hHmMsS](?:\b|$)|\d{3,}|\d+:\d+')
+        timer_re      = _re.compile(r'[A-Za-z0-9]{2,}[hHmMsS](?:\b|$)|\d+[hHmMsS]\d+|\d{3,}|\d+:\d+')
         timer_width   = float(action.get("timer_width_pct", 6.0))
         locked_template = action.get("locked_template")
         threshold     = float(action.get("threshold")) if action.get("threshold") is not None else None
@@ -1504,7 +1573,7 @@ class ActionExecutor:
         #   2. 3+ consecutive digits: catches colon-timers where OCR drops the colon ("5:38" → "598")
         #   3. Explicit colon format: catches "5:38" when OCR reads it correctly
         # Free formations show only an idle icon — no digits or time-unit text.
-        timer_re = _re.compile(r'[A-Za-z0-9]{2,}[hHmMsS](?:\b|$)|\d{3,}|\d+:\d+')
+        timer_re = _re.compile(r'[A-Za-z0-9]{2,}[hHmMsS](?:\b|$)|\d+[hHmMsS]\d+|\d{3,}|\d+:\d+')
 
         # ── Scan each slot ───────────────────────────────────────────────
         # Use the space between this slot's Y and the next slot's Y as the OCR
@@ -1724,12 +1793,15 @@ class ActionExecutor:
 
         # ── Adjust loop ───────────────────────────────────────────────
         for attempt in range(1, max_attempts + 1):
+            if self._stop_event and self._stop_event.is_set():
+                return self._ok(action, "adjust_boomer_level: stop requested")
             screenshot = self.bot.screenshot()
             current = detect_current_level(screenshot)
 
             if current is None:
                 self._log(f"  [adjust_boomer_level] attempt {attempt}: no level template matched — retrying")
-                time.sleep(tap_delay)
+                if self._interruptible_sleep(tap_delay):
+                    return self._ok(action, "adjust_boomer_level: stop requested")
                 continue
 
             self._log(f"  [adjust_boomer_level] attempt {attempt}: current={current} target={target}")
@@ -1744,9 +1816,190 @@ class ActionExecutor:
                 self._log(f"  [adjust_boomer_level] tapping - ({minus_tpl})")
                 tap_tpl(minus_tpl)
 
-            time.sleep(tap_delay)
+            if self._interruptible_sleep(tap_delay):
+                return self._ok(action, "adjust_boomer_level: stop requested")
 
         return self._fail(action, f"adjust_boomer_level: could not reach level {target} after {max_attempts} attempts")
+
+    def _adjust_boomer_level_ocr(self, action: dict) -> ActionResult:
+        """
+        Use OCR to read the current boomer level shown on screen, calculate the delta
+        to the target level, then tap + or - exactly that many times.
+
+        Action fields:
+            setting       - dot-path to target level, e.g. "rally.boomer_level"
+            ocr_region    - dict with x_pct, y_pct, w_pct, h_pct (percentage of screen)
+            plus_template - template to tap when level too low,  e.g. "btn_plus_boomer.png"
+            minus_template- template to tap when level too high, e.g. "btn_subtract_boomer_lvl.png"
+
+        Optional:
+            max_taps      - safety cap on total taps (default 100)
+            tap_delay     - seconds to wait between taps (default 0.4)
+            threshold     - vision confidence override for +/- button detection
+        """
+        setting_path = action.get("setting", "rally.boomer_level")
+        ocr_region   = action.get("ocr_region", {})
+        plus_tpl     = action.get("plus_template",  "btn_plus_boomer.png")
+        minus_tpl    = action.get("minus_template", "btn_subtract_boomer_lvl.png")
+        max_taps     = int(action.get("max_taps",   100))
+        tap_delay    = float(action.get("tap_delay", 0.4))
+        threshold    = float(action.get("threshold")) if action.get("threshold") is not None else None
+
+        # ── Resolve target level from farm settings ────────────────────
+        value = self.farm_settings
+        for key in setting_path.split("."):
+            value = value.get(key) if isinstance(value, dict) else None
+        if value is None:
+            self._log(f"  [adjust_boomer_level_ocr] setting '{setting_path}' not found — skipping")
+            return self._ok(action, f"Skipped: '{setting_path}' not configured")
+        target = int(value)
+        self._log(f"  [adjust_boomer_level_ocr] target level = {target}")
+
+        # ── OCR current level ──────────────────────────────────────────
+        screenshot = self.bot.screenshot()
+        if screenshot is None:
+            return self._fail(action, "adjust_boomer_level_ocr: failed to take screenshot")
+
+        sw, sh = screenshot.size
+        x_pct = ocr_region.get("x_pct", 35.0)
+        y_pct = ocr_region.get("y_pct", 38.0)
+        w_pct = ocr_region.get("w_pct", 30.0)
+        h_pct = ocr_region.get("h_pct", 8.0)
+        x1 = int(sw * x_pct / 100)
+        y1 = int(sh * y_pct / 100)
+        x2 = int(sw * (x_pct + w_pct) / 100)
+        y2 = int(sh * (y_pct + h_pct) / 100)
+
+        current = self.vision.read_number(screenshot, region=(x1, y1, x2, y2))
+        if current is None:
+            return self._fail(action, f"adjust_boomer_level_ocr: OCR could not read a number in region ({x1},{y1},{x2},{y2})")
+        self._log(f"  [adjust_boomer_level_ocr] OCR current level={current}, target={target}")
+
+        if current == target:
+            return self._ok(action, f"Boomer level already at {target}")
+
+        delta = target - current
+        tpl   = plus_tpl if delta > 0 else minus_tpl
+        taps  = min(abs(delta), max_taps)
+        self._log(f"  [adjust_boomer_level_ocr] delta={delta:+d} — tapping '{tpl}' x{taps}")
+
+        # Locate the button once, then tap its coordinates repeatedly
+        btn_path  = self._template_path(tpl)
+        btn_shot  = self.bot.screenshot()
+        btn_match = self.vision.find_template(btn_shot, btn_path, threshold=threshold)
+        if not btn_match:
+            return self._fail(action, f"adjust_boomer_level_ocr: '{tpl}' not found on screen")
+
+        for _ in range(taps):
+            if self._stop_event and self._stop_event.is_set():
+                return self._ok(action, "adjust_boomer_level_ocr: stop requested")
+            self.bot.tap(btn_match.x, btn_match.y)
+            if self._interruptible_sleep(tap_delay):
+                return self._ok(action, "adjust_boomer_level_ocr: stop requested")
+
+        self._log(f"  [adjust_boomer_level_ocr] done — tapped {taps} times, level should now be {target}")
+        return self._ok(action, f"Boomer level adjusted from {current} to {target}")
+
+    def _adjust_boomer_level_from_one(self, action: dict) -> ActionResult:
+        """
+        Reset boomer level to 1 by tapping minus until btn_lvl_1_boomer.png is confirmed,
+        then tap plus (target - 1) times to reach the target level.
+
+        Action fields:
+            setting          - dot-path to target level, e.g. "rally.boomer_level"
+            level_1_template - template that confirms level 1 is selected (default: btn_lvl_1_boomer.png)
+            plus_template    - tap to increase level (default: btn_plus_boomer.png)
+            minus_template   - tap to decrease level (default: btn_subtract_boomer_lvl.png)
+
+        Optional:
+            max_minus_taps - safety cap on minus taps while resetting to 1 (default 50)
+            tap_delay      - seconds between taps (default 0.4)
+            threshold      - vision confidence override
+        """
+        setting_path   = action.get("setting", "rally.boomer_level")
+        lvl1_tpl       = action.get("level_1_template", "btn_lvl_1_boomer.png")
+        plus_tpl       = action.get("plus_template",    "btn_plus_boomer.png")
+        minus_tpl      = action.get("minus_template",   "btn_subtract_boomer_lvl.png")
+        max_minus_taps = int(action.get("max_minus_taps", 50))
+        tap_delay      = float(action.get("tap_delay",  0.4))
+        threshold      = float(action.get("threshold")) if action.get("threshold") is not None else None
+
+        # ── Resolve target level ───────────────────────────────────────
+        value = self.farm_settings
+        for key in setting_path.split("."):
+            value = value.get(key) if isinstance(value, dict) else None
+        if value is None:
+            self._log(f"  [adjust_boomer_level_from_one] setting '{setting_path}' not found — skipping")
+            return self._ok(action, f"Skipped: '{setting_path}' not configured")
+        target = int(value)
+        self._log(f"  [adjust_boomer_level_from_one] target level = {target}")
+
+        minus_path = self._template_path(minus_tpl)
+        plus_path  = self._template_path(plus_tpl)
+        true_lvl1_path = self._template_path(action.get("true_level_1_template", "btn_true_lvl_1.png"))
+
+        # ── Step 1: confirm level 1 using the combined template ───────────────
+        # btn_true_lvl_1.png shows both the "1" level display and the grayed-out
+        # minus button together — a single unambiguous indicator of being at floor.
+        self._log(f"  [adjust_boomer_level_from_one] step 1 — checking for level 1")
+        missed_button = 0
+        actual_taps   = 0
+        at_level_one  = False
+
+        for i in range(max_minus_taps + 1):
+            if self._stop_event and self._stop_event.is_set():
+                return self._ok(action, "adjust_boomer_level_from_one: stop requested")
+
+            shot       = self.bot.screenshot()
+            lvl1_match = self.vision.find_template(shot, true_lvl1_path, threshold=threshold)
+            self._log(f"  [adjust_boomer_level_from_one] check — true_lvl1={'none' if not lvl1_match else f'{lvl1_match.confidence:.3f}'}")
+
+            if lvl1_match:
+                self._log(f"  [adjust_boomer_level_from_one] ✓ level 1 confirmed after {actual_taps} minus tap(s) (conf={lvl1_match.confidence:.3f})")
+                at_level_one = True
+                break
+
+            if i == max_minus_taps:
+                break  # exhausted — fail below
+
+            # Not confirmed yet — tap minus
+            match = self.vision.find_template(shot, minus_path, threshold=threshold)
+            if match:
+                self.bot.tap(match.x, match.y)
+                actual_taps  += 1
+                missed_button = 0
+            else:
+                missed_button += 1
+                self._log(f"  [adjust_boomer_level_from_one] WARNING: '{minus_tpl}' not found (attempt {missed_button})")
+                if missed_button >= 3:
+                    return self._fail(action, f"adjust_boomer_level_from_one: '{minus_tpl}' not visible — search panel may not be open")
+
+            if self._interruptible_sleep(tap_delay):
+                return self._ok(action, "adjust_boomer_level_from_one: stop requested")
+
+        if not at_level_one:
+            return self._fail(action, f"adjust_boomer_level_from_one: level 1 not confirmed after {actual_taps} minus taps")
+
+        if target == 1:
+            return self._ok(action, "Boomer level set to 1")
+
+        # ── Step 2: tap plus (target - 2) times ───────────────────────
+        # Template matches at level 2 (one step before true floor), so subtract 2 instead of 1
+        plus_taps = target - 2
+        self._log(f"  [adjust_boomer_level_from_one] step 2 — tapping + {plus_taps} time(s) to reach level {target}")
+        shot       = self.bot.screenshot()
+        plus_match = self.vision.find_template(shot, plus_path, threshold=threshold)
+        if not plus_match:
+            return self._fail(action, f"adjust_boomer_level_from_one: '{plus_tpl}' not found on screen")
+
+        for _ in range(plus_taps):
+            if self._stop_event and self._stop_event.is_set():
+                return self._ok(action, "adjust_boomer_level_from_one: stop requested")
+            self.bot.tap(plus_match.x, plus_match.y)
+            if self._interruptible_sleep(tap_delay):
+                return self._ok(action, "adjust_boomer_level_from_one: stop requested")
+
+        return self._ok(action, f"Boomer level set to {target}")
 
     def _adjust_resource_level(self, action: dict) -> ActionResult:
         """
@@ -1806,12 +2059,15 @@ class ActionExecutor:
             return False
 
         for attempt in range(1, max_attempts + 1):
+            if self._stop_event and self._stop_event.is_set():
+                return self._ok(action, "adjust_resource_level: stop requested")
             screenshot = self.bot.screenshot()
             current = detect_current_level(screenshot)
 
             if current is None:
                 self._log(f"  [adjust_resource_level] attempt {attempt}: no level template matched — retrying")
-                time.sleep(tap_delay)
+                if self._interruptible_sleep(tap_delay):
+                    return self._ok(action, "adjust_resource_level: stop requested")
                 continue
 
             self._log(f"  [adjust_resource_level] attempt {attempt}: current={current} target={target}")
@@ -1826,7 +2082,8 @@ class ActionExecutor:
                 self._log(f"  [adjust_resource_level] tapping - ({minus_tpl})")
                 tap_tpl(minus_tpl)
 
-            time.sleep(tap_delay)
+            if self._interruptible_sleep(tap_delay):
+                return self._ok(action, "adjust_resource_level: stop requested")
 
         return self._fail(action, f"adjust_resource_level: could not reach level {target} after {max_attempts} attempts")
 
@@ -1894,10 +2151,13 @@ class ActionExecutor:
 
         def set_level(target_lvl: int) -> bool:
             for attempt in range(1, max_attempts + 1):
+                if self._stop_event and self._stop_event.is_set():
+                    return False
                 current = detect_level(self.bot.screenshot())
                 if current is None:
                     self._log(f"  [search_resource_level] set_level attempt {attempt}: no match — retrying")
-                    time.sleep(tap_delay)
+                    if self._interruptible_sleep(tap_delay):
+                        return False
                     continue
                 self._log(f"  [search_resource_level] set_level attempt {attempt}: current={current} target={target_lvl}")
                 if current == target_lvl:
@@ -1908,7 +2168,8 @@ class ActionExecutor:
                     self.bot.tap(match.x, match.y)
                 else:
                     self._log(f"  [search_resource_level] '{btn}' not found")
-                time.sleep(tap_delay)
+                if self._interruptible_sleep(tap_delay):
+                    return False
             return False
 
         def reopen_search_panel():
@@ -1921,7 +2182,8 @@ class ActionExecutor:
                 w, h = shot.size
                 self._log(f"  [search_resource_level] lens template not found — tapping fallback zone")
                 self.bot.tap(int(w * lens_x / 100), int(h * lens_y / 100))
-            time.sleep(2.0)
+            if self._interruptible_sleep(2.0):
+                return
 
             if not resource_tpl:
                 return
@@ -1938,7 +2200,8 @@ class ActionExecutor:
                     int(w * (scroll_x - 30) / 100), int(h * scroll_y / 100),
                     300,
                 )
-                time.sleep(1.0)
+                if self._interruptible_sleep(1.0):
+                    return
                 shot = self.bot.screenshot()
                 res_match = self.vision.find_template(shot, self._template_path(resource_tpl))
                 if res_match:
@@ -1946,12 +2209,16 @@ class ActionExecutor:
                     self.bot.tap(res_match.x, res_match.y)
                 else:
                     self._log(f"  [search_resource_level] WARNING: could not re-select '{resource_tpl}'")
-            time.sleep(2.0)
+            self._interruptible_sleep(2.0)
 
         for lvl in range(start_level, max_level + 1):
+            if self._stop_event and self._stop_event.is_set():
+                return self._ok(action, "search_resource_level: stop requested")
             self._log(f"  [search_resource_level] trying level {lvl}")
 
             if not set_level(lvl):
+                if self._stop_event and self._stop_event.is_set():
+                    return self._ok(action, "search_resource_level: stop requested")
                 self._log(f"  [search_resource_level] could not set level {lvl} — skipping")
                 if lvl < max_level:
                     reopen_search_panel()
@@ -1965,14 +2232,16 @@ class ActionExecutor:
                     reopen_search_panel()
                 continue
             self.bot.tap(match.x, match.y)
-            time.sleep(2.0)
+            if self._interruptible_sleep(2.0):
+                return self._ok(action, "search_resource_level: stop requested")
 
             # Tap result zone
             shot = self.bot.screenshot()
             w, h = shot.size
             self._log(f"  [search_resource_level] tapping resource zone ({res_x}%, {res_y}%)")
             self.bot.tap(int(w * res_x / 100), int(h * res_y / 100))
-            time.sleep(2.0)
+            if self._interruptible_sleep(2.0):
+                return self._ok(action, "search_resource_level: stop requested")
 
             # Check for gather button
             match = self.vision.find_template(self.bot.screenshot(), self._template_path(gather_tpl))

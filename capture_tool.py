@@ -117,8 +117,37 @@ class CaptureTool(ctk.CTk):
         self.template_dir.mkdir(exist_ok=True)
         Path("tasks").mkdir(exist_ok=True)
 
+        # Load settings from farms.json so capture tool matches the GUI
+        self._vision_confidence = 0.8
+        self._boomer_level = 5
+        self._farm_settings: dict = {}
+        self._load_settings()
+
         self._build_ui()
         threading.Thread(target=self._connect, daemon=True).start()
+
+    def _load_settings(self):
+        """Read farms.json and sync port, vision confidence, and farm settings with the GUI."""
+        try:
+            import json as _json
+            with open("farms.json") as f:
+                data = _json.load(f)
+            bot_settings = data.get("bot_settings", {})
+            self._vision_confidence = float(bot_settings.get("vision_confidence", 0.8))
+            # Use the first enabled farm's port and task settings as defaults
+            for farm in data.get("farms", []):
+                if farm.get("enabled", False):
+                    self.port = int(farm.get("port", self.port))
+                    tasks = farm.get("tasks", {})
+                    self._farm_settings = {
+                        "rally":    tasks.get("rally",    {}),
+                        "gathering": tasks.get("gathering", {}),
+                    }
+                    rally = tasks.get("rally", {})
+                    self._boomer_level = int(rally.get("boomer_level", self._boomer_level))
+                    break
+        except Exception:
+            pass
 
     # ══════════════════════════════════════════════════════════════════════
     # UI
@@ -148,8 +177,17 @@ class CaptureTool(ctk.CTk):
                                         fg_color=C["panel2"],
                                         border_color=C["border"],
                                         text_color=C["text"])
-        self.port_entry.insert(0, "21503")
+        self.port_entry.insert(0, str(self.port))
         self.port_entry.pack(side="left", pady=12)
+
+        ctk.CTkLabel(top, text="Boomer Lvl:", font=FS,
+                     text_color=C["text2"]).pack(side="left", padx=(12, 4))
+        self.boomer_level_entry = ctk.CTkEntry(top, width=48, font=FM,
+                                                fg_color=C["panel2"],
+                                                border_color=C["border"],
+                                                text_color=C["text"])
+        self.boomer_level_entry.insert(0, str(self._boomer_level))
+        self.boomer_level_entry.pack(side="left", pady=12)
 
         self._topbtn(top, "CONNECT",      self._connect,             C["blue"])
         self._topbtn(top, "📷 SCREENSHOT", self._take_screenshot,     C["accent"])
@@ -1557,13 +1595,23 @@ class CaptureTool(ctk.CTk):
         self._test_stop_event = stop_event
 
         try:
-            vision   = VisionEngine(confidence_threshold=0.8)
+            vision   = VisionEngine(confidence_threshold=self._vision_confidence)
+            # Merge stored farm settings with live UI values (boomer level may have been edited)
+            try:
+                boomer_lvl = int(self.boomer_level_entry.get())
+            except (ValueError, AttributeError):
+                boomer_lvl = self._boomer_level
+            live_settings = dict(self._farm_settings)
+            live_settings.setdefault("rally", {})
+            live_settings["rally"] = dict(live_settings["rally"])
+            live_settings["rally"]["boomer_level"] = boomer_lvl
             executor = ActionExecutor(
                 bot=self.bot,
                 vision=vision,
                 template_dir=str(self.template_dir),
                 log_callback=lambda msg: tlog_and_save(msg, "info"),
                 stop_event=stop_event,
+                farm_settings=live_settings,
             )
 
             actions = self.recorded_actions

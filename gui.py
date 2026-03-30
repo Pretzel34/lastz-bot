@@ -25,7 +25,7 @@ from PIL import Image, ImageTk
 import customtkinter as ctk
 
 import version
-from paths import ensure_app_dir, get_farms_path
+from paths import ensure_app_dir, get_farms_path, get_resource_dir
 from updater import check_for_update, download_and_launch
 
 # Update these values for your repository.
@@ -33,7 +33,7 @@ GITHUB_OWNER = "Pretzel34"
 GITHUB_REPO = "lastz-bot"
 # The substring to match inside the GitHub release asset name.
 # Example: "LastZBot-0.1.0.exe" will be matched by "LastZBot".
-UPDATE_ASSET_NAME_CONTAINS = "LastZBot"
+UPDATE_ASSET_NAME_CONTAINS = "Setup"
 
 MEMUC_PATH = r"C:\Program Files\Microvirt\MEmu\memuc.exe"
 LASTZ_PKG  = "com.readygo.barrel.gp"
@@ -42,7 +42,7 @@ LASTZ_ACT  = "com.im30.aps.debug.UnityPlayerActivityCustom"
 try:
     from bot_engine import BotEngine, EngineState, load_config, save_config
     from action_executor import ActionStatus
-    from launcher import MEmuLauncher, index_to_port
+    from launcher import EmulatorLauncher, MEmuLauncher, index_to_port, get_profile
     BOT_AVAILABLE = True
 except ImportError as e:
     BOT_AVAILABLE = False
@@ -91,17 +91,17 @@ DAILY_TASKS = [
     ("collect_free_rewards", "Collect Free Rewards", True),
     ("collect_vip_rewards",  "Collect VIP Rewards",  True),
     ("collect_radar",        "Collect Radar",        True),
-    ("complete_radar",       "Complete Radar",       True),
     ("Collect Fuel",         "Collect Fuel",         True),
     ("Read Mail",            "Read Mail",            True),
     ("collect_recruits",     "Collect Recruits",     True),
+    ("healing",              "Enable Heal Troops",   False),
 ]
 
 # Rally task JSON files — (setting_key, label, json_filename)
 # setting_key must match the key in the "rally" settings block above
 RALLY_TASKS = [
     ("quick_join_rally", "Quick Join Rally", "quick_join_rally"),
-    ("create_rally",     "Create Rally",     "start_rally_on_boomer"),
+    ("create_rally",     "Create Rally",     "start_rally_on_boomer_alt"),
 ]
 
 # Gathering task JSON files — (setting_key, label, json_filename, default_enabled)
@@ -132,7 +132,7 @@ TASK_CATEGORIES = [
             {"key": "enabled",           "label": "Enable Rally Tab",      "type": "toggle",  "default": True},
             {"key": "quick_join_rally",  "label": "Quick Join Rally",      "type": "toggle",  "default": True},
             {"key": "create_rally",      "label": "Create Rally",          "type": "toggle",  "default": True},
-            {"key": "boomer_level",      "label": "Boomer Level",          "type": "spinner", "default": 5, "min": 1, "max": 10},
+            {"key": "boomer_level",      "label": "Boomer Level",          "type": "spinner", "default": 5, "min": 1, "max": 100},
             {"key": "use_max_formations","label": "Use Max Formations",    "type": "toggle",  "default": True},
             {"key": "max_rallies_per_day","label": "Max Rallies Per Day",  "type": "spinner", "default": 5, "min": 1, "max": 50},
         ]
@@ -163,12 +163,19 @@ DEFAULT_FARM = {
 }
 
 
-def new_farm(index: int, port: int = None) -> dict:
+def new_farm(index: int, port: int = None, emulator_type: str = "MEmu") -> dict:
     import copy
     f = copy.deepcopy(DEFAULT_FARM)
     f["name"] = f"Farm {index}"
     f["emu_index"] = index
-    f["port"] = port or (21503 + (index - 1) * 10)
+    if port:
+        f["port"] = port
+    else:
+        try:
+            from launcher import index_to_port
+            f["port"] = index_to_port(index - 1, emulator_type)  # index is 1-based in GUI
+        except Exception:
+            f["port"] = 21503 + (index - 1) * 10  # fallback
     return f
 
 
@@ -196,6 +203,18 @@ class BotApp(ctk.CTk):
         self._farm_widget_refs: dict = {}
         self._clipboard_farm = None
         self._record_runs = False
+        self._arrange_lock = threading.Lock()
+
+        # Timer state
+        self._bot_start_time = None
+        self._timer_running = False
+        self._timer_after_id = None
+        self._cycle_complete_time = None   # set when all tasks finish
+
+        # Farm-settings category drag-and-drop
+        self._cat_drag_key = None
+        self._cat_drag_hover_key = None
+        self._cat_frames: dict = {}
 
         self._load_data()
         self._build_ui()
@@ -210,10 +229,11 @@ class BotApp(ctk.CTk):
     def _default_bot_settings(self) -> dict:
         return {
             "emulator": "MEmu",
-            "memu_path": r"C:\Program Files\Microvirt\MEmu",
+            "emulator_path": r"C:\Program Files\Microvirt\MEmu",
             "force_kill_hung": True,
             "auto_run_startup": False,
             "max_farm_timeout": 40,
+            "max_concurrent_sessions": 1,
             "emulator_boot_timeout": 180,
             "game_load_wait": 20,
             "post_launch_wait": 5,
@@ -224,6 +244,7 @@ class BotApp(ctk.CTk):
             "loop_delay": 60,
             "screenshot_on_error": True,
             "auto_arrange": True,
+            "minimum_cycle_time": 120,
         }
 
     def _load_data(self):
@@ -235,6 +256,9 @@ class BotApp(ctk.CTk):
                 self.farms = data.get("farms", [])
                 self.bot_settings = {**self._default_bot_settings(),
                                      **data.get("bot_settings", {})}
+                # Migrate legacy memu_path → emulator_path
+                if "memu_path" in self.bot_settings and "emulator_path" not in data.get("bot_settings", {}):
+                    self.bot_settings["emulator_path"] = self.bot_settings.pop("memu_path")
             except Exception:
                 pass
         if not self.farms:
@@ -327,67 +351,113 @@ class BotApp(ctk.CTk):
     def _build_page_run_bot(self):
         pg = self.pages["run_bot"]
         hdr = self._page_header(pg, "▶  Run Bot",
-                                 "Connect instances and run your farm sequences.")
+                                 "Run your farm sequences.")
         ctrl = ctk.CTkFrame(hdr, fg_color="transparent")
         ctrl.pack(side="right", pady=10, padx=12)
-        self._btn(ctrl, "⚡ START ALL", self._start_all, C["accent"]).pack(side="left", padx=4)
-        self._btn(ctrl, "■ STOP ALL",  self._stop_all,  C["red"]).pack(side="left", padx=4)
 
-        ctk.CTkFrame(ctrl, width=1, fg_color=C["border"]).pack(
-            side="left", fill="y", padx=8, pady=4)
-
-        self.rec_toggle_btn = ctk.CTkButton(
-            ctrl, text="⏺ Record Runs", command=self._toggle_record_runs,
-            font=("Segoe UI Semibold", 10), height=28, corner_radius=4,
-            fg_color=C["panel2"], hover_color=C["border"],
-            text_color=C["text"], width=110,
+        self._run_btn = ctk.CTkButton(
+            ctrl, text="⚡ START BOT", command=self._toggle_bot,
+            font=FB, height=36, corner_radius=6,
+            fg_color=C["accent"], hover_color=C["accent2"],
+            text_color=C["bg"], width=140,
         )
-        self.rec_toggle_btn.pack(side="left", padx=4)
+        self._run_btn.pack(side="left", padx=4)
 
-        body = ctk.CTkFrame(pg, fg_color="transparent")
-        body.pack(fill="both", expand=True)
+        # HIDDEN: "Record Runs" button — kept for future debugging use
+        # Divider before it also commented out; restore both when re-enabling
+        # ctk.CTkFrame(ctrl, width=1, fg_color=C["border"]).pack(
+        #     side="left", fill="y", padx=8, pady=4)
+        # self.rec_toggle_btn = ctk.CTkButton(
+        #     ctrl, text="⏺ Record Runs", command=self._toggle_record_runs,
+        #     font=("Segoe UI Semibold", 10), height=28, corner_radius=4,
+        #     fg_color=C["panel2"], hover_color=C["border"],
+        #     text_color=C["text"], width=110,
+        # )
+        # self.rec_toggle_btn.pack(side="left", padx=4)
 
-        left = ctk.CTkFrame(body, fg_color="transparent")
-        left.pack(side="left", fill="both", expand=True, padx=(16, 8), pady=8)
+        # ── Timer + Status row ─────────────────────────────────────────────
+        stats_row = ctk.CTkFrame(pg, fg_color="transparent")
+        stats_row.pack(fill="x", padx=16, pady=(8, 0))
 
-        ctk.CTkLabel(left, text="INSTANCES", font=FT2,
-                     text_color=C["accent"]).pack(anchor="w", pady=(4, 8))
+        # Timer card
+        timer_card = ctk.CTkFrame(stats_row, fg_color=C["panel"], corner_radius=8,
+                                   border_width=1, border_color=C["border"])
+        timer_card.pack(side="left", fill="both", expand=True, padx=(0, 6), pady=4)
 
-        self.run_scroll = ctk.CTkScrollableFrame(left, fg_color=C["panel"],
-                                                  corner_radius=8)
-        self.run_scroll.pack(fill="both", expand=True)
-        self._rebuild_run_list()
+        ctk.CTkLabel(timer_card, text="⏱  Run Bot Timer", font=FB,
+                     text_color=C["text2"]).pack(anchor="w", padx=14, pady=(10, 6))
 
-        right = ctk.CTkFrame(body, fg_color=C["panel"], corner_radius=8, width=340)
-        right.pack(side="right", fill="y", padx=(0, 16), pady=8)
-        right.pack_propagate(False)
+        timer_vals = ctk.CTkFrame(timer_card, fg_color="transparent")
+        timer_vals.pack(anchor="w", padx=14, pady=(0, 12))
 
-        ctk.CTkLabel(right, text="LIVE PREVIEW", font=FT2,
-                     text_color=C["accent"]).pack(anchor="w", padx=14, pady=(12, 4))
+        self._timer_labels = {}
+        for key, label_text in [("days", "Days"), ("hrs", "Hr"),
+                                  ("min", "Min"), ("sec", "Sec")]:
+            unit_f = ctk.CTkFrame(timer_vals, fg_color="transparent")
+            unit_f.pack(side="left", padx=(0, 18))
+            num_lbl = ctk.CTkLabel(unit_f, text="0",
+                                   font=("Segoe UI Black", 22), text_color=C["text"])
+            num_lbl.pack(side="left")
+            ctk.CTkLabel(unit_f, text=f"  {label_text}",
+                         font=FT, text_color=C["text3"]).pack(side="left")
+            self._timer_labels[key] = num_lbl
 
-        self.preview_canvas = ctk.CTkLabel(
-            right, text="No preview\n(connect first)",
-            font=FM, text_color=C["text3"],
-            fg_color=C["panel2"], corner_radius=6, width=312, height=175
-        )
-        self.preview_canvas.pack(padx=14, pady=4)
+        # Status card
+        status_card = ctk.CTkFrame(stats_row, fg_color=C["panel"], corner_radius=8,
+                                    border_width=1, border_color=C["border"])
+        status_card.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=4)
 
-        self._btn(right, "⟳ Refresh Preview",
-                  self._manual_preview).pack(padx=14, pady=4, fill="x")
+        ctk.CTkLabel(status_card, text="📊  Status", font=FB,
+                     text_color=C["text2"]).pack(anchor="w", padx=14, pady=(10, 6))
 
-        ctk.CTkFrame(right, height=1, fg_color=C["border"]).pack(fill="x", padx=14, pady=6)
+        status_inner = ctk.CTkFrame(status_card, fg_color="transparent")
+        status_inner.pack(anchor="w", padx=14, pady=(0, 12))
 
-        ctk.CTkLabel(right, text="ACTIVITY LOG", font=FT2,
-                     text_color=C["accent"]).pack(anchor="w", padx=14, pady=(4, 4))
+        self._status_bot_lbl = ctk.CTkLabel(status_inner, text="Bot Status: Stopped",
+                                             font=FB, text_color=C["text2"])
+        self._status_bot_lbl.pack(anchor="w")
 
-        log_bg = ctk.CTkFrame(right, fg_color=C["panel2"], corner_radius=6)
-        log_bg.pack(fill="both", expand=True, padx=14, pady=(0, 4))
+        active_total = len([f for f in self.farms if f.get("enabled", True)])
+        self._status_farms_lbl = ctk.CTkLabel(status_inner,
+                                               text=f"Active Farms: 0 / {active_total}",
+                                               font=FB, text_color=C["text2"])
+        self._status_farms_lbl.pack(anchor="w")
+
+        min_cycle = int(self.bot_settings.get("minimum_cycle_time", 120))
+        self._status_cycle_lbl = ctk.CTkLabel(status_inner,
+                                               text=f"Min Cycle Time: {min_cycle} min",
+                                               font=FB, text_color=C["text2"])
+        self._status_cycle_lbl.pack(anchor="w")
+
+        self._status_next_lbl = ctk.CTkLabel(status_inner, text="Next Cycle: —",
+                                              font=FB, text_color=C["text2"])
+        self._status_next_lbl.pack(anchor="w")
+
+        # ── Activity Log (main focus, full width) ──────────────────────────
+        log_card = ctk.CTkFrame(pg, fg_color=C["panel"], corner_radius=8,
+                                 border_width=1, border_color=C["border"])
+        log_card.pack(fill="both", expand=True, padx=16, pady=(8, 16))
+
+        log_hdr = ctk.CTkFrame(log_card, fg_color="transparent", height=40)
+        log_hdr.pack(fill="x", padx=14, pady=(10, 0))
+        log_hdr.pack_propagate(False)
+        ctk.CTkLabel(log_hdr, text="📋  Activity Log", font=FT2,
+                     text_color=C["accent"]).pack(side="left")
+        self._btn(log_hdr, "🗑 Clear", self._clear_log, small=True).pack(side="right")
+
+        log_bg = ctk.CTkFrame(log_card, fg_color=C["panel2"], corner_radius=6)
+        log_bg.pack(fill="both", expand=True, padx=14, pady=(6, 14))
 
         self.log_box = tk.Text(
             log_bg, font=FSM, bg=C["panel2"], fg=C["text3"],
             relief="flat", bd=0, wrap="word",
-            state="disabled", padx=6, pady=6
+            state="disabled", padx=8, pady=8
         )
+        sb = tk.Scrollbar(log_bg, command=self.log_box.yview,
+                          bg=C["panel2"], troughcolor=C["panel2"],
+                          relief="flat", bd=0)
+        sb.pack(side="right", fill="y")
+        self.log_box.configure(yscrollcommand=sb.set)
         self.log_box.pack(fill="both", expand=True, padx=2, pady=2)
         self.log_box.tag_config("error",   foreground=C["red"])
         self.log_box.tag_config("success", foreground=C["green"])
@@ -395,48 +465,167 @@ class BotApp(ctk.CTk):
         self.log_box.tag_config("info",    foreground=C["text3"])
         self.log_box.tag_config("accent",  foreground=C["accent"])
 
-        self._btn(right, "🗑 Clear Log", self._clear_log).pack(
-            padx=14, pady=(0, 8), fill="x")
+        # Hidden stubs so references elsewhere don't crash
+        self.preview_canvas = ctk.CTkLabel(log_card, text="", width=0, height=0)
+
+    def _toggle_bot(self):
+        if self._timer_running:
+            self._stop_all()
+        else:
+            self._start_all()
+
+    def _update_run_btn(self):
+        if not hasattr(self, "_run_btn"):
+            return
+        if self._timer_running:
+            self._run_btn.configure(
+                text="■ STOP BOT", fg_color=C["red"],
+                hover_color=C["red_dim"], text_color=C["white"])
+        else:
+            self._run_btn.configure(
+                text="⚡ START BOT", fg_color=C["accent"],
+                hover_color=C["accent2"], text_color=C["bg"])
 
     def _rebuild_run_list(self):
-        for w in self.run_scroll.winfo_children():
-            w.destroy()
-        for farm in self.farms:
-            self._run_farm_row(self.run_scroll, farm)
+        pass  # instances list removed from Run Bot page
 
-    def _run_farm_row(self, parent, farm: dict):
-        row = ctk.CTkFrame(parent, fg_color=C["card"], corner_radius=6,
-                           border_width=1, border_color=C["border"])
-        row.pack(fill="x", padx=8, pady=4)
+    # ── Category drag-and-drop ────────────────────────────────────────────
 
-        left = ctk.CTkFrame(row, fg_color="transparent")
-        left.pack(side="left", padx=12, pady=10, fill="x", expand=True)
+    def _cat_drag_start(self, event, cat_key: str):
+        self._cat_drag_key = cat_key
+        self._cat_drag_hover_key = None
 
-        ctk.CTkLabel(left,
-            text=f" {farm['emu_index']:02d} ",
-            font=("Consolas", 11, "bold"),
-            text_color=C["accent"], fg_color=C["accent_dim"], corner_radius=4
-        ).pack(side="left", padx=(0, 10))
+        # Dim the source frame so it's clear it's being moved
+        if cat_key in self._cat_frames:
+            self._cat_frames[cat_key].configure(
+                fg_color=C["accent_dim"], border_color=C["accent"])
 
-        info = ctk.CTkFrame(left, fg_color="transparent")
-        info.pack(side="left")
-        ctk.CTkLabel(info, text=farm["name"], font=FB, text_color=C["text"]).pack(anchor="w")
-        ctk.CTkLabel(info, text=f"Port: {farm['port']}  |  Emu ID: {farm['emu_index']}",
-                     font=FSM, text_color=C["text3"]).pack(anchor="w")
+        # Create a floating ghost that follows the cursor
+        cat = next((c for c in TASK_CATEGORIES if c["key"] == cat_key), None)
+        ghost_text = f"  ⠿  {cat['icon']}  {cat['label']}  " if cat else f"  ⠿  {cat_key}  "
 
-        right = ctk.CTkFrame(row, fg_color="transparent")
-        right.pack(side="right", padx=12, pady=10)
+        ghost = tk.Toplevel(self)
+        ghost.overrideredirect(True)
+        ghost.attributes("-topmost", True)
+        try:
+            ghost.attributes("-alpha", 0.88)
+        except Exception:
+            pass
+        ghost.configure(bg=C["card"])
+        tk.Label(ghost, text=ghost_text,
+                 font=("Segoe UI Semibold", 11),
+                 bg=C["card"], fg=C["accent"],
+                 padx=10, pady=8).pack()
 
-        enabled = farm.get("enabled", True)
-        status_lbl = ctk.CTkLabel(right,
-            text="● ACTIVE" if enabled else "● DISABLED",
-            font=FSM, text_color=C["green"] if enabled else C["muted"])
-        status_lbl.pack(side="left", padx=(0, 12))
+        self._cat_ghost = ghost
+        mx, my = self.winfo_pointerxy()
+        ghost.geometry(f"+{mx + 14}+{my - 20}")
 
-        self._btn(right, "▶ START",
-                  lambda f=farm: self._start_farm(f), C["green"], small=True).pack(side="left", padx=2)
-        self._btn(right, "■ STOP",
-                  lambda f=farm: self._stop_farm(f),  C["red"],   small=True).pack(side="left", padx=2)
+    def _cat_drag_motion(self, event):
+        if not self._cat_drag_key:
+            return
+        mx, my = self.winfo_pointerxy()
+
+        # Keep ghost glued to cursor
+        if hasattr(self, "_cat_ghost"):
+            try:
+                self._cat_ghost.geometry(f"+{mx + 14}+{my - 20}")
+            except Exception:
+                pass
+
+        # Detect which item the cursor is over
+        hovered = None
+        for ckey, frame in self._cat_frames.items():
+            if ckey == self._cat_drag_key:
+                continue
+            try:
+                if (frame.winfo_rootx() <= mx <= frame.winfo_rootx() + frame.winfo_width()
+                        and frame.winfo_rooty() <= my <= frame.winfo_rooty() + frame.winfo_height()):
+                    hovered = ckey
+                    break
+            except Exception:
+                pass
+
+        # Only act when the hover target actually changes
+        if hovered == self._cat_drag_hover_key:
+            return
+        self._cat_drag_hover_key = hovered
+
+        # Refresh border highlights
+        for ckey, frame in self._cat_frames.items():
+            try:
+                if ckey == self._cat_drag_key:
+                    frame.configure(border_color=C["accent"])
+                elif ckey == hovered:
+                    frame.configure(border_color=C["blue"])
+                else:
+                    frame.configure(border_color=C["border"])
+            except Exception:
+                pass
+
+        if hovered:
+            # Live-reorder: repack frames to preview where the item would land
+            order = list(self.bot_settings.get(
+                "task_cat_order", [c["key"] for c in TASK_CATEGORIES]))
+            for c in TASK_CATEGORIES:
+                if c["key"] not in order:
+                    order.append(c["key"])
+            preview = list(order)
+            src_i = preview.index(self._cat_drag_key) if self._cat_drag_key in preview else -1
+            tgt_i = preview.index(hovered) if hovered in preview else -1
+            if src_i >= 0 and tgt_i >= 0:
+                preview.insert(tgt_i, preview.pop(src_i))
+            for key in preview:
+                if key in self._cat_frames:
+                    self._cat_frames[key].pack_forget()
+                    self._cat_frames[key].pack(fill="x", pady=4)
+
+    def _cat_drag_end(self, event, farm_idx: int):
+        if not self._cat_drag_key:
+            return
+
+        # Destroy ghost
+        if hasattr(self, "_cat_ghost"):
+            try:
+                self._cat_ghost.destroy()
+            except Exception:
+                pass
+            del self._cat_ghost
+
+        target_key = self._cat_drag_hover_key
+
+        # Reset frame appearances
+        for frame in self._cat_frames.values():
+            try:
+                frame.configure(fg_color=C["panel"], border_color=C["border"])
+            except Exception:
+                pass
+
+        if target_key:
+            order = list(self.bot_settings.get(
+                "task_cat_order", [c["key"] for c in TASK_CATEGORIES]))
+            for c in TASK_CATEGORIES:
+                if c["key"] not in order:
+                    order.append(c["key"])
+            if self._cat_drag_key in order and target_key in order:
+                src_i = order.index(self._cat_drag_key)
+                tgt_i = order.index(target_key)
+                order.insert(tgt_i, order.pop(src_i))
+                self.bot_settings["task_cat_order"] = order
+                self._save_data()
+                # Full rebuild to clean up any pack order artifacts
+                self._show_farm_detail(farm_idx)
+        else:
+            # Dropped on nothing — restore original visual order
+            order = list(self.bot_settings.get(
+                "task_cat_order", [c["key"] for c in TASK_CATEGORIES]))
+            for key in order:
+                if key in self._cat_frames:
+                    self._cat_frames[key].pack_forget()
+                    self._cat_frames[key].pack(fill="x", pady=4)
+
+        self._cat_drag_key = None
+        self._cat_drag_hover_key = None
 
     # ══════════════════════════════════════════════════════════════════════
     # PAGE: Bot Settings
@@ -444,6 +633,9 @@ class BotApp(ctk.CTk):
 
     def _build_page_bot_settings(self):
         pg = self.pages["bot_settings"]
+        # Clear existing widgets so this method is safe to call on emulator type change
+        for w in pg.winfo_children():
+            w.destroy()
         self._page_header(pg, "🔧  Bot Settings",
                            "Global configuration for all farm instances.")
 
@@ -453,21 +645,23 @@ class BotApp(ctk.CTk):
         card = self._card(scroll, "Emulator Configuration")
         self._setting_row(card, "Emulator", "select", "emulator",
                           ["MEmu", "LDPlayer", "Nox"])
-        self._setting_row(card, "MEmu Path", "path", "memu_path")
-        self._setting_row(card, "Force Kill Hung Emulator", "toggle", "force_kill_hung")
-        self._setting_row(card, "Auto Run on Startup",      "toggle", "auto_run_startup")
-        self._setting_row(card, "Auto Arrange Emulator",    "toggle", "auto_arrange")
-        self._setting_row(card, "Max Farm Timeout (min)",   "number", "max_farm_timeout")
+        emu_type = self.bot_settings.get("emulator", "MEmu")
+        self._setting_row(card, f"{emu_type} Path", "path", "emulator_path")
+        self._setting_row(card, "Force Kill Hung Emulator",  "toggle", "force_kill_hung")
+        self._setting_row(card, "Auto Run on Startup",       "toggle", "auto_run_startup")
+        self._setting_row(card, "Auto Arrange Emulator",     "toggle", "auto_arrange")
+        self._setting_row(card, "Max Farm Timeout (min)",    "number", "max_farm_timeout")
+        self._setting_row(card, "Max Concurrent Sessions",   "number", "max_concurrent_sessions")
+
+        card_t = self._card(scroll, "⏱  Timing & Load Waits")
+        self._setting_row(card_t, "Emulator Boot Timeout (sec)", "number", "emulator_boot_timeout")
+        self._setting_row(card_t, "Game Load Wait (sec)",        "number", "game_load_wait")
+        self._setting_row(card_t, "Post-Launch Wait (sec)",      "number", "post_launch_wait")
 
         card2 = self._card(scroll, "Bot Behavior")
-        # Timing card
-        card_t = self._card(pg, "⏱  Timing & Load Waits")
-        self._setting_row(card_t, "Emulator Boot Timeout (sec)",  "number", "emulator_boot_timeout")
-        self._setting_row(card_t, "Game Load Wait (sec)",         "number", "game_load_wait")
-        self._setting_row(card_t, "Post-Launch Wait (sec)",       "number", "post_launch_wait")
-
-        self._setting_row(card2, "Loop Tasks Continuously", "toggle", "loop_tasks")
-        self._setting_row(card2, "Loop Delay (seconds)",    "number", "loop_delay")
+        self._setting_row(card2, "Loop Tasks Continuously",        "toggle", "loop_tasks")
+        self._setting_row(card2, "Loop Delay (seconds)",           "number", "loop_delay")
+        self._setting_row(card2, "Minimum Cycle Time (in Minutes)", "number", "minimum_cycle_time")
         self._setting_row(card2, "Retry Failed Actions",    "toggle", "retry_failed")
         self._setting_row(card2, "Max Retries",             "number", "max_retries")
         self._setting_row(card2, "Screenshot on Error",     "toggle", "screenshot_on_error")
@@ -631,14 +825,24 @@ class BotApp(ctk.CTk):
         self._btn(bot_bar, "💾 SAVE", lambda: self._save_farm(idx),
                   C["accent"]).pack(side="right", padx=10, pady=10)
 
-        # Build categories
+        # Build categories in user-defined order (drag-and-drop persisted)
         farm_key = f"farm_{idx}"
         if farm_key not in self._expanded_cats:
             self._expanded_cats[farm_key] = {}
 
         self._farm_widget_refs = {}
+        self._cat_frames = {}
 
-        for cat in TASK_CATEGORIES:
+        order = self.bot_settings.get("task_cat_order",
+                                       [c["key"] for c in TASK_CATEGORIES])
+        cat_map = {c["key"]: c for c in TASK_CATEGORIES}
+        ordered_cats = [cat_map[k] for k in order if k in cat_map]
+        # Append any categories not yet in the saved order
+        for c in TASK_CATEGORIES:
+            if c["key"] not in order:
+                ordered_cats.append(c)
+
+        for cat in ordered_cats:
             self._build_cat_section(scroll, farm, idx, cat, farm_key)
 
     def _build_cat_section(self, parent, farm, farm_idx, cat, farm_key):
@@ -648,14 +852,21 @@ class BotApp(ctk.CTk):
         outer = ctk.CTkFrame(parent, fg_color=C["panel"], corner_radius=8,
                               border_width=1, border_color=C["border"])
         outer.pack(fill="x", pady=4)
+        self._cat_frames[cat_key] = outer  # store for drop detection
 
         # Header row
         hdr = ctk.CTkFrame(outer, fg_color="transparent", height=44)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
 
-        ctk.CTkLabel(hdr, text="⠿", font=("Segoe UI", 14),
-                     text_color=C["muted"]).pack(side="left", padx=(10, 4))
+        drag_lbl = ctk.CTkLabel(hdr, text="⠿", font=("Segoe UI", 14),
+                                 text_color=C["muted"], cursor="fleur")
+        drag_lbl.pack(side="left", padx=(10, 4))
+        drag_lbl.bind("<ButtonPress-1>",
+                      lambda e, ck=cat_key: self._cat_drag_start(e, ck))
+        drag_lbl.bind("<B1-Motion>", self._cat_drag_motion)
+        drag_lbl.bind("<ButtonRelease-1>",
+                      lambda e, fi=farm_idx: self._cat_drag_end(e, fi))
         ctk.CTkLabel(hdr, text=f"{cat['icon']}  {cat['label']}",
                      font=FB, text_color=C["text"]).pack(side="left", padx=4)
 
@@ -794,7 +1005,8 @@ class BotApp(ctk.CTk):
 
     def _add_farm(self):
         next_idx = max((f["emu_index"] for f in self.farms), default=0) + 1
-        self.farms.append(new_farm(next_idx))
+        emu_type = self.bot_settings.get("emulator", "MEmu")
+        self.farms.append(new_farm(next_idx, emulator_type=emu_type))
         self._save_data()
         self._rebuild_farm_list()
         self._show_farm_detail(len(self.farms) - 1)
@@ -946,15 +1158,41 @@ class BotApp(ctk.CTk):
     # Bot Engine Control
     # ══════════════════════════════════════════════════════════════════════
 
+    def _make_launcher(self, log_callback) -> "EmulatorLauncher":
+        """Build an EmulatorLauncher from current bot settings."""
+        emu_type     = self.bot_settings.get("emulator", "MEmu")
+        emu_path     = self.bot_settings.get("emulator_path", r"C:\Program Files\Microvirt\MEmu")
+        boot_timeout = int(float(self.bot_settings.get("emulator_boot_timeout", 180)))
+        game_wait    = int(float(self.bot_settings.get("game_load_wait", 20)))
+        try:
+            import json, sys as _sys
+            _base = _sys._MEIPASS if getattr(_sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+            with open(os.path.join(_base, "config.json")) as _f:
+                _cfg = json.load(_f)
+            adb_path = _cfg.get("emulator", {}).get("adb_path", "adb")
+        except Exception:
+            adb_path = "adb"
+        return EmulatorLauncher(
+            emulator_type=emu_type,
+            install_path=emu_path,
+            adb_path=adb_path,
+            package=LASTZ_PKG,
+            activity=LASTZ_ACT,
+            log_callback=log_callback,
+            boot_timeout=boot_timeout,
+            game_timeout=game_wait,
+        )
+
     def _connect_farm(self, farm: dict):
         if not BOT_AVAILABLE:
             messagebox.showerror("Error", f"Bot modules missing:\n{IMPORT_ERROR}")
             return
 
-        idx   = farm["emu_index"] - 1   # GUI is 1-based, MEmu is 0-based
+        emu_type = self.bot_settings.get("emulator", "MEmu")
+        idx   = farm["emu_index"] - 1   # GUI is 1-based, emulator is 0-based
         port  = farm["port"]
         name  = farm["name"]
-        self._log(f"Launching {name} (MEmu index {idx}, port {port})...", "accent")
+        self._log(f"Launching {name} ({emu_type} index {idx}, port {port})...", "accent")
 
         def do():
             try:
@@ -962,23 +1200,9 @@ class BotApp(ctk.CTk):
                 def launch_log(msg, level="info"):
                     self.after(0, lambda m=msg, l=level: self._log(m, l))
 
-                # memu_path stores the folder; append memuc.exe
-                import os
-                memu_folder = self.bot_settings.get("memu_path", 
-                    r"C:\Program Files\Microvirt\MEmu")
-                memuc_exe = os.path.join(memu_folder, "memuc.exe")
-                boot_timeout = int(float(self.bot_settings.get("emulator_boot_timeout", 180)))
-                game_wait    = int(float(self.bot_settings.get("game_load_wait", 20)))
-                post_wait    = int(float(self.bot_settings.get("post_launch_wait", 5)))
+                post_wait = int(float(self.bot_settings.get("post_launch_wait", 5)))
 
-                launcher = MEmuLauncher(
-                    memuc_path=memuc_exe,
-                    package=LASTZ_PKG,
-                    activity=LASTZ_ACT,
-                    log_callback=launch_log,
-                    boot_timeout=boot_timeout,
-                    game_timeout=game_wait,
-                )
+                launcher = self._make_launcher(launch_log)
                 ok = launcher.launch_and_connect(index=idx, wait_for_game=True)
                 if ok and post_wait > 0:
                     self.after(0, lambda s=post_wait: self._log(
@@ -988,11 +1212,13 @@ class BotApp(ctk.CTk):
                 if not ok:
                     self.after(0, lambda: self._log(
                         f"✗ {name} failed to launch", "error"))
+                    self.after(0, self._stop_timer)
                     return
 
                 # Step 2 — connect bot engine to the now-running instance
                 engine = BotEngine("config.json")
                 engine.config["emulator"]["ports"] = [port]
+                engine.config["emulator"]["type"]  = emu_type
                 engine.on_log = lambda m: self.after(0, lambda msg=m: self._log(msg))
                 engine.on_state_change = lambda s: self.after(0, self._refresh_stats_table)
                 engine.on_stats_update = lambda s: self.after(0, self._refresh_stats_table)
@@ -1003,13 +1229,25 @@ class BotApp(ctk.CTk):
                     from vision import VisionEngine
                     from action_executor import ActionExecutor
                     engine.bot     = launched_bot
+                    # Enforce portrait orientation first
+                    if launched_bot.info and launched_bot.info.screen_width > launched_bot.info.screen_height:
+                        self.after(0, lambda: self._log("Screen is landscape — forcing portrait...", "info"))
+                        launched_bot.enforce_portrait()
+                    # Enforce expected resolution
+                    exp_w = engine.config["emulator"].get("expected_width", 540)
+                    exp_h = engine.config["emulator"].get("expected_height", 960)
+                    if launched_bot.info and (launched_bot.info.screen_width != exp_w or launched_bot.info.screen_height != exp_h):
+                        self.after(0, lambda w=exp_w, h=exp_h, cw=launched_bot.info.screen_width, ch=launched_bot.info.screen_height: self._log(
+                            f"Resolution mismatch ({cw}x{ch}) — enforcing {w}x{h}...", "info"))
+                        launched_bot.enforce_resolution(exp_w, exp_h)
                     engine.vision  = VisionEngine(
                         confidence_threshold=float(self.bot_settings.get("vision_confidence", 0.8)))
                     engine.executor = ActionExecutor(
                         bot=launched_bot,
                         vision=engine.vision,
-                        template_dir=self.bot_settings.get("template_dir", "templates"),
+                        template_dir=str(get_resource_dir() / self.bot_settings.get("template_dir", "templates")),
                         log_callback=lambda m: self.after(0, lambda msg=m: self._log(msg)),
+                        emulator_type=emu_type,
                     )
                     self.engines[farm["emu_index"]] = engine
                     self.after(0, lambda: self._log(
@@ -1029,7 +1267,102 @@ class BotApp(ctk.CTk):
 
         threading.Thread(target=do, daemon=True).start()
 
-    def _start_farm(self, farm: dict):
+    def _arrange_memu_windows(self):
+        """Tile all visible emulator windows left-to-right across the screen.
+        One window → right half. Two+ → equal columns from left to right."""
+        import ctypes
+        import subprocess
+
+        user32   = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        emu_type     = self.bot_settings.get("emulator", "MEmu")
+        process_name = get_profile(emu_type)["process_name"]
+
+        # Find emulator PIDs via tasklist (reliable regardless of window title)
+        try:
+            result = subprocess.run(
+                ['tasklist', '/FI', f'IMAGENAME eq {process_name}', '/FO', 'CSV', '/NH'],
+                capture_output=True, text=True, timeout=5,
+            )
+            memu_pids = set()
+            for line in result.stdout.strip().splitlines():
+                parts = line.strip('"').split('","')
+                if len(parts) >= 2:
+                    try:
+                        memu_pids.add(int(parts[1]))
+                    except ValueError:
+                        pass
+        except Exception as e:
+            self.after(0, lambda: self._log(f"  ⚠ arrange: could not list {process_name} PIDs: {e}", "warn"))
+            return
+
+        if not memu_pids:
+            self.after(0, lambda: self._log(f"  ℹ arrange: no {process_name} processes found", "info"))
+            return
+
+        # Enumerate all top-level windows and collect those belonging to emulator PIDs
+        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_size_t, ctypes.c_size_t)
+        found = []
+
+        def _cb(hwnd, _):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            # Skip windows with no title (background/child windows)
+            if user32.GetWindowTextLengthW(hwnd) == 0:
+                return True
+            pid = ctypes.c_ulong(0)
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value in memu_pids:
+                # Only include top-level windows (no owner)
+                if user32.GetWindow(hwnd, 4) == 0:  # GW_OWNER = 4
+                    buf = ctypes.create_unicode_buffer(256)
+                    user32.GetWindowTextW(hwnd, buf, 256)
+                    found.append((buf.value, pid.value, hwnd))
+            return True
+
+        user32.EnumWindows(EnumWindowsProc(_cb), 0)
+
+        if not found:
+            self.after(0, lambda: self._log(f"  ℹ arrange: {emu_type} running but no top-level window found yet", "info"))
+            return
+
+        # Sort by PID for consistent top-to-bottom ordering on the left
+        found.sort(key=lambda x: x[1])
+        SW_RESTORE = 9
+
+        class RECT(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+        def get_size(hwnd):
+            r = RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(r))
+            return r.right - r.left, r.bottom - r.top
+
+        # Stack MEmu windows top-to-bottom at (0, 0) without resizing
+        y_offset = 0
+        max_memu_w = 0
+        for _, _, hwnd in found:
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            w, h = get_size(hwnd)
+            user32.MoveWindow(hwnd, 0, y_offset, w, h, True)
+            y_offset += h
+            if w > max_memu_w:
+                max_memu_w = w
+
+        # Move the bot GUI to the right of the MEmu stack
+        bot_hwnd = user32.FindWindowW(None, "LAST Z BOT")
+        if bot_hwnd:
+            bw, bh = get_size(bot_hwnd)
+            user32.ShowWindow(bot_hwnd, SW_RESTORE)
+            user32.MoveWindow(bot_hwnd, max_memu_w, 0, bw, bh, True)
+
+        n = len(found)
+        self.after(0, lambda count=n, et=emu_type: self._log(
+            f"  📐 Arranged {count} {et} window(s) top-left, bot GUI to the right", "info"))
+
+    def _start_farm(self, farm: dict, _semaphore=None):
         """Launch emulator, open Last Z, then start tasks — all in one click."""
         if not BOT_AVAILABLE:
             messagebox.showerror("Error", f"Bot modules missing:\n{IMPORT_ERROR}")
@@ -1043,44 +1376,38 @@ class BotApp(ctk.CTk):
         except (ValueError, Exception):
             pass
 
+        emu_type = self.bot_settings.get("emulator", "MEmu")
         name = farm["name"]
-        idx  = farm["emu_index"] - 1   # GUI 1-based → MEmu 0-based (MEmu-1=0, MEmu-2=1)
-        port = 21503 + idx * 10        # Always derive port from idx: 0→21503, 1→21513, 2→21523
+        idx  = farm["emu_index"] - 1   # GUI 1-based → emulator 0-based
+        port = index_to_port(idx, emu_type)
         farm["port"] = port            # Keep in sync
-        self._log(f"▶ Starting {name} — memuc index={idx}, port={port}", "accent")
+        self._log(f"▶ Starting {name} — {emu_type} index={idx}, port={port}", "accent")
+        self._start_timer()
 
         def do():
+            if _semaphore:
+                _semaphore.acquire()
             try:
-                import os
-                memu_folder = self.bot_settings.get("memu_path",
-                    r"C:\Program Files\Microvirt\MEmu")
-                memuc_exe = os.path.join(memu_folder, "memuc.exe")
-
                 def launch_log(msg, level="info"):
                     self.after(0, lambda m=msg, l=level: self._log(m, l))
 
-                boot_timeout = int(float(self.bot_settings.get("emulator_boot_timeout", 180)))
-                game_wait    = int(float(self.bot_settings.get("game_load_wait", 20)))
-                post_wait    = int(float(self.bot_settings.get("post_launch_wait", 5)))
+                post_wait = int(float(self.bot_settings.get("post_launch_wait", 5)))
 
                 # Step 1 — launch emulator + Last Z
-                launcher = MEmuLauncher(
-                    memuc_path=memuc_exe,
-                    package=LASTZ_PKG,
-                    activity=LASTZ_ACT,
-                    log_callback=launch_log,
-                    boot_timeout=boot_timeout,
-                    game_timeout=game_wait,
-                )
+                launcher = self._make_launcher(launch_log)
                 ok = launcher.launch_and_connect(index=idx, wait_for_game=True)
                 if not ok:
                     self.after(0, lambda: self._log(f"✗ {name}: emulator launch failed", "error"))
+                    self.after(0, self._stop_timer)
                     return
                 if post_wait > 0:
                     self.after(0, lambda s=post_wait: self._log(
                         f"  ⏱ Post-launch wait {s}s for game to settle...", "info"))
                     import time as _time
                     _time.sleep(post_wait)
+                if self.bot_settings.get("auto_arrange", True):
+                    with self._arrange_lock:
+                        self._arrange_memu_windows()
 
                 # Step 2 — build engine using the live bot connection
                 from vision import VisionEngine
@@ -1089,20 +1416,27 @@ class BotApp(ctk.CTk):
                 bot    = launcher.get_bot(idx)
                 vision = VisionEngine(
                     confidence_threshold=float(self.bot_settings.get("vision_confidence", 0.8)))
-                executor = ActionExecutor(
-                    bot=bot,
-                    vision=vision,
-                    template_dir=self.bot_settings.get("template_dir", "templates"),
-                    log_callback=lambda m: self.after(0, lambda msg=m: self._log(msg)),
-                )
+
+                # Engine must be created first so we can pass its stop_event to the executor.
+                # Without this, engine.stop() sets the event but the executor never sees it.
                 engine = BotEngine("config.json")
                 engine.config["emulator"]["ports"] = [port]
-                engine.bot      = bot
-                engine.vision   = vision
-                engine.executor = executor
+                engine.config["emulator"]["type"]  = emu_type
+                engine.bot    = bot
+                engine.vision = vision
                 engine.on_log          = lambda m: self.after(0, lambda msg=m: self._log(msg))
                 engine.on_state_change = lambda s: self.after(0, self._refresh_stats_table)
                 engine.on_stats_update = lambda s: self.after(0, self._refresh_stats_table)
+
+                executor = ActionExecutor(
+                    bot=bot,
+                    vision=vision,
+                    template_dir=str(get_resource_dir() / self.bot_settings.get("template_dir", "templates")),
+                    log_callback=lambda m: self.after(0, lambda msg=m: self._log(msg)),
+                    emulator_type=emu_type,
+                    stop_event=engine._stop_event,  # wire stop signal to executor
+                )
+                engine.executor = executor
                 self.engines[farm["emu_index"]] = engine
 
                 # Recording
@@ -1114,7 +1448,7 @@ class BotApp(ctk.CTk):
                 # Step 3 — run startup dismiss sequence before tasks
                 import json as _json
                 from pathlib import Path
-                tasks_dir = Path(self.bot_settings.get("tasks_dir", "tasks"))
+                tasks_dir = get_resource_dir() / self.bot_settings.get("tasks_dir", "tasks")
                 startup_file = tasks_dir / "startup_dismiss.json"
                 if startup_file.exists():
                     try:
@@ -1123,6 +1457,8 @@ class BotApp(ctk.CTk):
                         startup_actions = startup_data.get("actions", startup_data) if isinstance(startup_data, dict) else startup_data
                         self.after(0, lambda: self._log("  ▶ Running startup dismiss...", "info"))
                         for act in startup_actions:
+                            if engine._stop_event.is_set():
+                                return
                             executor.execute(act)
                         self.after(0, lambda: self._log("  ✓ Startup dismiss done", "success"))
                     except Exception as e:
@@ -1139,6 +1475,8 @@ class BotApp(ctk.CTk):
                         identify_actions = identify_data.get("actions", identify_data) if isinstance(identify_data, dict) else identify_data
                         self.after(0, lambda: self._log("  ▶ Identifying resource priorities...", "info"))
                         for act in identify_actions:
+                            if engine._stop_event.is_set():
+                                return
                             executor.execute(act)
                         self.after(0, lambda: self._log("  ✓ Resource priority identified", "success"))
                     except Exception as e:
@@ -1160,9 +1498,29 @@ class BotApp(ctk.CTk):
                 self.after(0, lambda: self._log(
                     f"✓ {name} running — {len(tasks)} task(s) loaded", "success"))
 
+                # Wait for the engine to finish before releasing the concurrency slot
+                if engine._thread:
+                    engine._thread.join()
+
+                # Record cycle completion time (used for "Next Cycle" countdown)
+                self.after(0, self._on_farm_cycle_complete)
+
+                # Close the emulator instance after tasks complete
+                try:
+                    launcher.stop_instance(idx)
+                    self.after(0, lambda: self._log(f"  ✓ {name} — emulator closed", "info"))
+                    if self.bot_settings.get("auto_arrange", True):
+                        with self._arrange_lock:
+                            self._arrange_memu_windows()
+                except Exception:
+                    pass
+
             except Exception as e:
                 import traceback
                 self.after(0, lambda err=traceback.format_exc(): self._log(f"Error: {err}", "error"))
+            finally:
+                if _semaphore:
+                    _semaphore.release()
 
         threading.Thread(target=do, daemon=True).start()
 
@@ -1171,26 +1529,41 @@ class BotApp(ctk.CTk):
         if engine:
             engine.stop()
             self._log(f"■ {farm['name']} stopped", "warn")
+        # Delay the check slightly so engine state has time to update
+        self.after(800, self._check_timer_stop)
+
+    def _check_timer_stop(self):
+        """Stop the session timer if no engines are still running."""
+        any_running = any(
+            hasattr(e, "state") and e.state.value == "running"
+            for e in self.engines.values()
+        )
+        if not any_running:
+            self._stop_timer()
+        else:
+            self._update_status_display()
+
+    def _on_farm_cycle_complete(self):
+        """Called when a farm's engine thread finishes — starts the Next Cycle countdown."""
+        self._cycle_complete_time = datetime.now()
+        self._update_status_display()
 
     def _toggle_record_runs(self):
+        # Button is hidden — method kept for future re-enabling
         self._record_runs = not self._record_runs
-        if self._record_runs:
-            self.rec_toggle_btn.configure(fg_color=C["red"], text_color=C["bg"],
-                                           text="⏺ Recording ON")
-            self._log("Run recording ON — next farm start will record frames.", "accent")
-        else:
-            self.rec_toggle_btn.configure(fg_color=C["panel2"], text_color=C["text"],
-                                           text="⏺ Record Runs")
-            self._log("Run recording OFF.", "info")
+        self._log(f"Run recording {'ON' if self._record_runs else 'OFF'}.", "info")
 
     def _start_all(self):
+        max_concurrent = int(self.bot_settings.get("max_concurrent_sessions", 1))
+        sem = threading.Semaphore(max_concurrent)
         for farm in self.farms:
             if farm.get("enabled", True):
-                self._start_farm(farm)
+                self._start_farm(farm, _semaphore=sem)
 
     def _stop_all(self):
         for farm in self.farms:
             self._stop_farm(farm)
+        self._stop_timer()
 
     def _farm_to_tasks(self, farm: dict) -> list:
         """
@@ -1200,7 +1573,7 @@ class BotApp(ctk.CTk):
         import json as _json
         from pathlib import Path
 
-        tasks_dir = Path(self.bot_settings.get("tasks_dir", "tasks"))
+        tasks_dir = get_resource_dir() / self.bot_settings.get("tasks_dir", "tasks")
         tasks     = []
         farm_tasks = farm.get("tasks", {})
         daily_cfg  = farm_tasks.get("daily_tasks", {})
@@ -1358,6 +1731,94 @@ class BotApp(ctk.CTk):
         self.log_box.delete("1.0", "end")
         self.log_box.configure(state="disabled")
 
+    # ── Timer ─────────────────────────────────────────────────────────────
+
+    def _start_timer(self):
+        if not self._timer_running:
+            self._bot_start_time = datetime.now()
+            self._timer_running = True
+            self._tick_timer()
+        self._update_status_display()
+        self._update_run_btn()
+
+    def _stop_timer(self):
+        self._timer_running = False
+        if self._timer_after_id:
+            self.after_cancel(self._timer_after_id)
+            self._timer_after_id = None
+        self._bot_start_time = None
+        self._cycle_complete_time = None
+        if hasattr(self, "_timer_labels"):
+            for lbl in self._timer_labels.values():
+                lbl.configure(text="0")
+        self._update_status_display()
+        self._update_run_btn()
+
+    def _tick_timer(self):
+        if not self._timer_running or not self._bot_start_time:
+            return
+        elapsed = (datetime.now() - self._bot_start_time).total_seconds()
+        days  = int(elapsed // 86400)
+        hours = int((elapsed % 86400) // 3600)
+        mins  = int((elapsed % 3600) // 60)
+        secs  = int(elapsed % 60)
+        if hasattr(self, "_timer_labels"):
+            self._timer_labels["days"].configure(text=str(days))
+            self._timer_labels["hrs"].configure(text=str(hours))
+            self._timer_labels["min"].configure(text=str(mins))
+            self._timer_labels["sec"].configure(text=str(secs))
+        self._update_status_display()
+
+        # Auto-restart: if a cycle finished, no farms are active, and the
+        # minimum cycle time has elapsed, kick off the next cycle.
+        if self._cycle_complete_time:
+            no_farms_active = not any(
+                getattr(e, "_thread", None) and e._thread.is_alive()
+                for e in self.engines.values()
+            )
+            if no_farms_active:
+                min_cycle_sec = int(self.bot_settings.get("minimum_cycle_time", 120)) * 60
+                elapsed_since = (datetime.now() - self._cycle_complete_time).total_seconds()
+                if elapsed_since >= min_cycle_sec:
+                    self._log("⟳ Cycle time elapsed — starting next cycle...", "accent")
+                    self._cycle_complete_time = None
+                    self._start_all()
+
+        self._timer_after_id = self.after(1000, self._tick_timer)
+
+    def _update_status_display(self):
+        if not hasattr(self, "_status_bot_lbl"):
+            return
+        running = self._timer_running
+        self._status_bot_lbl.configure(
+            text=f"Bot Status: {'Running' if running else 'Stopped'}",
+            text_color=C["green"] if running else C["text2"],
+        )
+        active = sum(
+            1 for e in self.engines.values()
+            if hasattr(e, "state") and e.state.value == "running"
+        )
+        total = len(self.farms)
+        self._status_farms_lbl.configure(text=f"Active Farms: {active} / {total}")
+
+        min_cycle = int(self.bot_settings.get("minimum_cycle_time", 120))
+        self._status_cycle_lbl.configure(text=f"Min Cycle Time: {min_cycle} min")
+
+        if self._cycle_complete_time:
+            elapsed_min = (datetime.now() - self._cycle_complete_time).total_seconds() / 60
+            remaining = max(0.0, min_cycle - elapsed_min)
+            if remaining <= 0:
+                self._status_next_lbl.configure(
+                    text="Next Cycle: Ready now", text_color=C["green"])
+            else:
+                h = int(remaining // 60)
+                m = int(remaining % 60)
+                label = f"In {h}h {m}m" if h else f"In {m}m"
+                self._status_next_lbl.configure(
+                    text=f"Next Cycle: {label}", text_color=C["text2"])
+        else:
+            self._status_next_lbl.configure(text="Next Cycle: —", text_color=C["text2"])
+
     # ══════════════════════════════════════════════════════════════════════
     # Shared UI Helpers
     # ══════════════════════════════════════════════════════════════════════
@@ -1437,6 +1898,10 @@ class BotApp(ctk.CTk):
             except (ValueError, TypeError):
                 return  # ignore invalid input mid-typing
         self.bot_settings[key] = value
+        # When emulator type changes, rebuild the bot settings page so the path
+        # label updates (e.g. "MEmu Path" → "LDPlayer Path")
+        if key == "emulator":
+            self._build_page_bot_settings()
 
     def _browse_path(self, key: str, var: ctk.StringVar):
         path = filedialog.askdirectory()
@@ -1491,8 +1956,8 @@ class BotApp(ctk.CTk):
                     "Update Available",
                     f"A new version ({remote}) is available. Download and install?",
                 ):
-                    file_name = f"{GITHUB_REPO}-{remote}.exe" if sys.platform.startswith("win") else f"{GITHUB_REPO}-{remote}.dmg"
-                    success = download_and_launch(asset_url, file_name)
+                    file_name = f"LastZBot-{remote}-Setup.exe" if sys.platform.startswith("win") else f"{GITHUB_REPO}-{remote}.dmg"
+                    success = download_and_launch(asset_url, file_name, args=["/S"])
                     if not success:
                         messagebox.showerror("Update Failed", "Failed to download the installer.")
                     else:

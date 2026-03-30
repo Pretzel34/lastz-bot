@@ -1,15 +1,24 @@
 {
-  "name": "start_rally_on_boomer",
+  "name": "start_rally_on_boomer_alt",
   "actions": [
     {
       "action": "rally_count_check",
       "note": "Abort if daily rally limit already reached"
     },
     {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
       "action": "if_template_tap",
       "template": "btn_go_world.png",
       "required": false,
-      "note": "If in HQ, tap to go to world. If already in world, skip."
+      "note": "Navigate from HQ to world view — skip if already in world"
     },
     {
       "action": "wait",
@@ -31,24 +40,22 @@
       "template": "btn_boomer.png",
       "fallback_template": "btn_frostbane_boomer.png",
       "required": false,
-      "note": "Select Boomer category \u00e2\u20ac\u201d tries btn_boomer.png first, falls back to btn_frostbane_boomer.png"
+      "note": "Select Boomer category — tries btn_boomer.png first, falls back to btn_frostbane_boomer.png"
     },
     {
       "action": "wait",
       "seconds": 3.0
     },
     {
-      "action": "adjust_boomer_level",
+      "action": "adjust_boomer_level_from_one",
       "setting": "rally.boomer_level",
-      "template_pattern": "btn_lvl_{value}_boomer.png",
+      "true_level_1_template": "btn_true_lvl_1.png",
       "plus_template": "btn_plus_boomer.png",
       "minus_template": "btn_subtract_boomer_lvl.png",
-      "min_level": 1,
-      "max_level": 8,
-      "max_attempts": 20,
-      "tap_delay": 3.0,
+      "max_minus_taps": 50,
+      "tap_delay": 0.7,
       "required": false,
-      "note": "Detect current boomer level and tap +/- until it matches rally.boomer_level setting"
+      "note": "Checks for level 1 first, taps minus until btn_lvl_1_boomer.png confirmed, then taps plus (target-1) times"
     },
     {
       "action": "wait",

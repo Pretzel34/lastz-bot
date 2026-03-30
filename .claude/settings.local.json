@@ -3,7 +3,20 @@
     "allow": [
       "Bash(python:*)",
       "Bash(ls:*)",
-      "Bash(adb devices:*)"
+      "Bash(adb devices:*)",
+      "Bash(start pythonw:*)",
+      "Bash(where adb:*)",
+      "Bash(C:/platform-tools/adb.exe devices:*)",
+      "Bash(C:/platform-tools/adb.exe connect:*)",
+      "Bash(\"C:/Program Files/Microvirt/MEmu/memuc.exe\" listvms 2>&1)",
+      "Bash(python3 -c \":*)",
+      "Bash(grep:*)",
+      "Read(//c/Program Files \\(x86\\)/NSIS/**)",
+      "Read(//c/Program Files/**)"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "adb-bot"
+  ]
 }

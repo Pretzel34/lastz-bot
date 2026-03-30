@@ -12,7 +12,8 @@
     },
     {
       "action": "wait",
-      "seconds": 2.0
+      "seconds": 5.0,
+      "note": "Wait for world view to fully load before checking formations"
     },
     {
       "action": "check_formations_busy",

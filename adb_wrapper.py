@@ -260,6 +260,47 @@ class ADBWrapper:
         _print(f"[ADB] Waiting {seconds}s...")
         time.sleep(seconds)
 
+    def enforce_portrait(self) -> bool:
+        """
+        If the screen is in landscape orientation, force portrait via accelerometer lock.
+        Returns True if already portrait or successfully switched.
+        """
+        self._require_device()
+        if self.info and self.info.screen_width < self.info.screen_height:
+            return True  # already portrait
+        _print(f"[ADB] Screen is landscape ({self.info.screen_width}x{self.info.screen_height}) — forcing portrait...")
+        # Disable auto-rotate and force portrait (rotation=0)
+        self._device.shell("settings put system accelerometer_rotation 0")
+        self._device.shell("settings put system user_rotation 0")
+        time.sleep(1.5)
+        self.info = self._fetch_device_info()
+        ok = self.info.screen_width < self.info.screen_height
+        if ok:
+            _print(f"[ADB] Portrait enforced: {self.info.screen_width}x{self.info.screen_height}")
+        else:
+            _print(f"[ADB] WARNING: Still landscape after rotation attempt")
+        return ok
+
+    def enforce_resolution(self, width: int, height: int) -> bool:
+        """
+        Force the display to the given resolution via `wm size`.
+        Re-fetches device info afterward so info.screen_width/height are current.
+        Returns True if the resolution was already correct or was set successfully.
+        """
+        self._require_device()
+        if self.info and self.info.screen_width == width and self.info.screen_height == height:
+            return True
+        _print(f"[ADB] Enforcing resolution {width}x{height} (was {self.info.screen_width}x{self.info.screen_height})")
+        self._device.shell(f"wm size {width}x{height}")
+        time.sleep(1.0)
+        self.info = self._fetch_device_info()
+        ok = self.info.screen_width == width and self.info.screen_height == height
+        if ok:
+            _print(f"[ADB] Resolution set to {width}x{height}")
+        else:
+            _print(f"[ADB] WARNING: Resolution still {self.info.screen_width}x{self.info.screen_height} after set attempt")
+        return ok
+
     def shell(self, command: str) -> str:
         """
         Run a raw ADB shell command. Escape hatch for anything not covered above.

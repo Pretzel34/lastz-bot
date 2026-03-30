@@ -25,7 +25,7 @@ jobs:
 
       - name: Build executable
         run: .\build_windows.bat
-        shell: powershell
+        shell: cmd
 
       - name: Get version from tag
         id: version
@@ -35,6 +35,13 @@ jobs:
           echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
         shell: powershell
 
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Build installer
+        run: makensis /DAPP_VERSION=${{ steps.version.outputs.version }} installer.nsi
+        shell: cmd
+
       - name: Create GitHub Release
         id: create_release
         uses: actions/create-release@v1
@@ -43,27 +50,25 @@ jobs:
           release_name: Last Z Bot v${{ steps.version.outputs.version }}
           body: |
             ## Release v${{ steps.version.outputs.version }}
-            
-            [Download the installer](https://github.com/Pretzel34/lastz-bot/releases/download/${{ github.ref_name }}/LastZBot-v${{ steps.version.outputs.version }}.exe)
-            
+
+            ### Installation
+            1. Download `LastZBot-v${{ steps.version.outputs.version }}-Setup.exe` below
+            2. Run it — app installs to Program Files and a Start Menu shortcut is created
+            3. Future updates install automatically when you launch the app
+
             ### What's New
             See commit history for details.
-            
-            ### Installation
-            1. Download `LastZBot-v${{ steps.version.outputs.version }}.exe`
-            2. Run the installer
-            3. Launch the app from your Start Menu
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload release asset
+      - name: Upload installer
         uses: actions/upload-release-asset@v1
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: dist\LastZBot.exe
-          asset_name: LastZBot-v${{ steps.version.outputs.version }}.exe
+          asset_path: dist\LastZBot-v${{ steps.version.outputs.version }}-Setup.exe
+          asset_name: LastZBot-v${{ steps.version.outputs.version }}-Setup.exe
           asset_content_type: application/octet-stream
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

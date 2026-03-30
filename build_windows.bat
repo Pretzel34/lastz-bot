@@ -10,6 +10,14 @@ if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
 if exist LastZBot.spec del /q LastZBot.spec
 
-pyinstaller --noconfirm --onefile --name LastZBot gui.py
+python -m PyInstaller --noconfirm --onefile --name LastZBot ^
+  --add-data "templates;templates" ^
+  --add-data "tasks;tasks" ^
+  --add-data "config.json;." ^
+  --add-data "farms_template.json;." ^
+  --collect-all easyocr ^
+  --hidden-import adbutils ^
+  --collect-all cv2 ^
+  gui.py
 
 echo Build complete. Output: dist\LastZBot.exe

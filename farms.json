@@ -2,9 +2,9 @@
   "farms": [
     {
       "name": "Prex Farm 1",
-      "emu_index": 1,
-      "port": 21503,
-      "enabled": false,
+      "emu_index": 5,
+      "port": 21543,
+      "enabled": true,
       "tasks": {
         "collect_resources": {
           "enabled": true,
@@ -72,7 +72,7 @@
       "name": "Farm 2",
       "emu_index": 2,
       "port": 21513,
-      "enabled": true,
+      "enabled": false,
       "tasks": {
         "daily_tasks": {
           "enabled": false,

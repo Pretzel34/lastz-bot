@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "adb-bot": {
+      "command": "python",
+      "args": ["C:/bot/mcp_adb_server.py"]
+    }
+  }
+}

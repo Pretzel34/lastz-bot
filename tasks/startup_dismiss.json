@@ -2,7 +2,12 @@
   "name": "startup_dismiss",
   "actions": [
     {"action": "wait", "seconds": 2},
-    {"action": "tap_zone", "x_pct": 15.0, "y_pct": 15.0, "note": "Dismiss popup"},
-    {"action": "wait", "seconds": 1}
+    {
+      "action": "if_template_tap",
+      "template": "btn_opening_click_away.png",
+      "required": false,
+      "note": "Dismiss opening advertisement if present"
+    },
+    {"action": "wait", "seconds": 1.0}
   ]
 }

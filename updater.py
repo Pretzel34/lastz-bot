@@ -106,27 +106,30 @@ def download_file(url: str, dest_path: str, timeout: int = 30) -> bool:
         return False
 
 
-def launch_installer(path: str) -> None:
+def launch_installer(path: str, args: list = None) -> None:
     """Launch the downloaded installer.
 
     On Windows, this executes the file directly. On macOS, it uses 'open'.
+    Pass args=["/S"] for a silent NSIS install (used by auto-update).
     """
+    extra = args or []
     if sys.platform.startswith("win"):
-        subprocess.Popen([path], shell=True)
+        subprocess.Popen([path] + extra, shell=True)
     elif sys.platform == "darwin":
         subprocess.Popen(["open", path])
     else:
-        subprocess.Popen([path])
+        subprocess.Popen([path] + extra)
 
 
-def download_and_launch(url: str, file_name: str) -> bool:
+def download_and_launch(url: str, file_name: str, args: list = None) -> bool:
     """Download an installer and launch it.
 
     Returns True if download succeeded and process was launched.
+    Pass args=["/S"] for a silent NSIS install (used by auto-update).
     """
     tmp_dir = tempfile.gettempdir()
     dest_path = os.path.join(tmp_dir, file_name)
     if not download_file(url, dest_path):
         return False
-    launch_installer(dest_path)
+    launch_installer(dest_path, args=args)
     return True

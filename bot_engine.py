@@ -20,6 +20,8 @@ from enum import Enum
 from adb_wrapper import ADBWrapper, InstanceManager
 from vision import VisionEngine
 from action_executor import ActionExecutor, ActionStatus
+import sys
+from paths import get_resource_dir, ensure_app_dir
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +32,10 @@ DEFAULT_CONFIG = {
     "emulator": {
         "host": "127.0.0.1",
         "ports": [21503],
-        "adb_path": "adb"
+        "adb_path": "adb",
+        "type": "MEmu",
+        "expected_width": 540,
+        "expected_height": 960
     },
     "bot": {
         "template_dir": "templates",
@@ -219,7 +224,8 @@ class BotEngine:
         threshold = self.config["vision"]["confidence_threshold"]
         self.vision = VisionEngine(confidence_threshold=threshold)
 
-        template_dir = self.config["bot"]["template_dir"]
+        template_dir = str(get_resource_dir() / self.config["bot"]["template_dir"])
+        self._log(f"[Init] template_dir: {template_dir} (exists: {Path(template_dir).exists()})")
         self.executor = ActionExecutor(
             bot=self.bot,
             vision=self.vision,
@@ -227,7 +233,18 @@ class BotEngine:
             log_callback=self._log,
             farm_settings=self.farm_settings,
             stop_event=self._stop_event,
+            emulator_type=self.config["emulator"].get("type", "MEmu"),
         )
+
+        if self.bot.info.screen_width > self.bot.info.screen_height:
+            self._log(f"Screen is landscape ({self.bot.info.screen_width}x{self.bot.info.screen_height}) — forcing portrait...")
+            self.bot.enforce_portrait()
+
+        exp_w = self.config["emulator"].get("expected_width", 540)
+        exp_h = self.config["emulator"].get("expected_height", 960)
+        if self.bot.info.screen_width != exp_w or self.bot.info.screen_height != exp_h:
+            self._log(f"Resolution mismatch ({self.bot.info.screen_width}x{self.bot.info.screen_height}) — enforcing {exp_w}x{exp_h}...")
+            self.bot.enforce_resolution(exp_w, exp_h)
 
         self._log(f"Connected: {self.bot.info.model} | "
                   f"Android {self.bot.info.android_version} | "
@@ -558,8 +575,11 @@ class BotEngine:
             self.on_log(full)
 
     def _setup_logging(self):
-        log_dir = self.config["bot"]["log_dir"]
-        Path(log_dir).mkdir(exist_ok=True)
+        if getattr(sys, "frozen", False):
+            log_dir = str(ensure_app_dir() / "logs")
+        else:
+            log_dir = self.config["bot"]["log_dir"]
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
         log_file = f"{log_dir}/bot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         logging.basicConfig(
             level=logging.INFO,
@@ -570,13 +590,21 @@ class BotEngine:
             ]
         )
         # Fix Windows console Unicode issues — replace chars that cp1252 can't encode
+        # Guard against pythonw where stdout/stderr are None
         for h in logging.root.handlers:
             if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
-                h.stream = open(h.stream.fileno(), mode='w', encoding='utf-8', closefd=False, buffering=1)
+                try:
+                    if h.stream is not None and h.stream.fileno() >= 0:
+                        h.stream = open(h.stream.fileno(), mode='w', encoding='utf-8', closefd=False, buffering=1)
+                except Exception:
+                    pass
         self.logger = logging.getLogger("BotEngine")
 
     def _save_session_log(self):
-        log_dir = self.config["bot"]["log_dir"]
+        if getattr(sys, "frozen", False):
+            log_dir = str(ensure_app_dir() / "logs")
+        else:
+            log_dir = self.config["bot"]["log_dir"]
         path = f"{log_dir}/session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(path, "w") as f:
             json.dump(self.stats.to_dict(), f, indent=2)

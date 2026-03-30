@@ -7,6 +7,18 @@ from pathlib import Path
 APP_NAME = "LastZBot"
 
 
+def get_resource_dir() -> Path:
+    """Return the directory where bundled resources (tasks/, templates/) live.
+
+    When running as a PyInstaller frozen EXE, this is sys._MEIPASS (the temp
+    extraction directory). When running from source, it's the directory
+    containing this file.
+    """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).parent
+
+
 def get_app_dir() -> Path:
     """Return the directory where user-specific config/data should live."""
     if sys.platform.startswith("win"):
