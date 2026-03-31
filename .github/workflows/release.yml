@@ -2,8 +2,8 @@ name: Build & Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
 
 jobs:
   build:
@@ -13,6 +13,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump patch version and set tag
+        id: version
+        shell: bash
+        run: |
+          LATEST=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+          if [ -z "$LATEST" ]; then
+            NEW_TAG="v1.0.0"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
+            NEW_TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+          fi
+          echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "version=${NEW_TAG#v}" >> $GITHUB_OUTPUT
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,14 +45,6 @@ jobs:
         run: .\build_windows.bat
         shell: cmd
 
-      - name: Get version from tag
-        id: version
-        run: |
-          $tag = "${{ github.ref_name }}"
-          $version = $tag -replace '^v', ''
-          echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-        shell: powershell
-
       - name: Install NSIS
         run: choco install nsis -y
 
@@ -46,14 +54,15 @@ jobs:
           makensis /DAPP_VERSION=${{ steps.version.outputs.version }} installer.nsi
         shell: powershell
 
-      - name: Create GitHub Release
+      - name: Create tag and GitHub Release
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: Last Z Bot v${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Last Z Bot ${{ steps.version.outputs.tag }}
           body: |
-            ## Release v${{ steps.version.outputs.version }}
+            ## Release ${{ steps.version.outputs.tag }}
 
             ### Installation
             1. Download `LastZBot-v${{ steps.version.outputs.version }}-Setup.exe` below
