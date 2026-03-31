@@ -1946,49 +1946,49 @@ class BotApp(ctk.CTk):
 
         win = ctk.CTkToplevel(self)
         win.title("Welcome to Last Z Bot")
-        win.geometry("520x380")
+        win.geometry("500x420")
         win.resizable(False, False)
         win.configure(fg_color=C["panel"])
-        win.grab_set()
-        win.focus_force()
 
         # Center over main window
         self.update_idletasks()
-        x = self.winfo_x() + (self.winfo_width() - 520) // 2
-        y = self.winfo_y() + (self.winfo_height() - 380) // 2
+        x = self.winfo_x() + (self.winfo_width() - 500) // 2
+        y = self.winfo_y() + (self.winfo_height() - 420) // 2
         win.geometry(f"+{x}+{y}")
-
-        pad = {"padx": 30, "pady": 0}
+        win.after(100, win.grab_set)
 
         ctk.CTkLabel(win, text="Welcome to Last Z Bot",
                      font=("Segoe UI", 20, "bold"), text_color=C["accent"]).pack(pady=(30, 6))
-        ctk.CTkLabel(win, text="Let's get you set up. You can change these settings later\nin the Bot Settings tab.",
+        ctk.CTkLabel(win, text="Let's get you set up. You can change these\nsettings later in the Bot Settings tab.",
                      font=("Segoe UI", 12), text_color=C["text2"], justify="center").pack(pady=(0, 24))
 
+        body = ctk.CTkFrame(win, fg_color="transparent")
+        body.pack(fill="x", padx=40)
+
         # Emulator selector
-        ctk.CTkLabel(win, text="Which emulator are you using?",
-                     font=("Segoe UI", 13, "bold"), text_color=C["text"]).pack(anchor="w", **pad)
+        ctk.CTkLabel(body, text="Which emulator are you using?",
+                     font=("Segoe UI", 13, "bold"), text_color=C["text"]).pack(anchor="w", pady=(0, 6))
 
         emu_var = ctk.StringVar(value=self.bot_settings.get("emulator", "MEmu"))
         path_var = ctk.StringVar(value=EMU_DEFAULTS.get(emu_var.get(), ""))
 
-        emu_menu = ctk.CTkOptionMenu(win, values=["MEmu", "LDPlayer", "Nox"],
-                                     variable=emu_var, width=460,
-                                     fg_color=C["card"], button_color=C["accent"],
-                                     button_hover_color=C["accent2"],
-                                     command=lambda v: path_var.set(EMU_DEFAULTS.get(v, "")))
-        emu_menu.pack(pady=(6, 18), **pad)
+        ctk.CTkOptionMenu(body, values=["MEmu", "LDPlayer", "Nox"],
+                          variable=emu_var, fg_color=C["card"],
+                          button_color=C["accent"], button_hover_color=C["accent2"],
+                          command=lambda v: path_var.set(EMU_DEFAULTS.get(v, ""))
+                          ).pack(fill="x", pady=(0, 18))
 
         # Path field
-        ctk.CTkLabel(win, text="Emulator install path:",
-                     font=("Segoe UI", 13, "bold"), text_color=C["text"]).pack(anchor="w", **pad)
+        ctk.CTkLabel(body, text="Emulator install path:",
+                     font=("Segoe UI", 13, "bold"), text_color=C["text"]).pack(anchor="w", pady=(0, 6))
 
-        path_row = ctk.CTkFrame(win, fg_color="transparent")
-        path_row.pack(fill="x", pady=(6, 0), **pad)
+        path_row = ctk.CTkFrame(body, fg_color="transparent")
+        path_row.pack(fill="x")
+        path_row.columnconfigure(0, weight=1)
 
-        path_entry = ctk.CTkEntry(path_row, textvariable=path_var, width=360,
+        path_entry = ctk.CTkEntry(path_row, textvariable=path_var,
                                   fg_color=C["card"], border_color=C["border"])
-        path_entry.pack(side="left")
+        path_entry.pack(side="left", fill="x", expand=True)
 
         def browse():
             from tkinter import filedialog
@@ -2011,7 +2011,7 @@ class BotApp(ctk.CTk):
         ctk.CTkButton(win, text="Get Started", width=200,
                       fg_color=C["accent"], hover_color=C["accent2"],
                       text_color="#000000", font=("Segoe UI", 13, "bold"),
-                      command=finish).pack(pady=28)
+                      command=finish).pack(pady=30)
 
     def _refresh_bot_settings_ui(self):
         self._build_page_bot_settings()
