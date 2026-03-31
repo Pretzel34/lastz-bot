@@ -30,6 +30,11 @@ jobs:
           echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
           echo "version=${NEW_TAG#v}" >> $GITHUB_OUTPUT
 
+      - name: Update version.py
+        shell: bash
+        run: |
+          echo "__version__ = \"${{ steps.version.outputs.version }}\"" > version.py
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

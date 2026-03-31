@@ -221,6 +221,10 @@ class BotApp(ctk.CTk):
         self._nav_select("run_bot")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        # Show setup wizard on first launch (no farms.json existed).
+        if self._is_first_run:
+            self.after(300, self._show_setup_wizard)
+
         # Check for updates in background (non-blocking).
         self._check_for_updates_async()
 
@@ -249,6 +253,7 @@ class BotApp(ctk.CTk):
 
     def _load_data(self):
         p = self._data_path
+        self._is_first_run = not p.exists()
         if p.exists():
             try:
                 with open(p) as f:
@@ -1929,6 +1934,87 @@ class BotApp(ctk.CTk):
             corner_radius=4,
             width=140 if full else 0,
         )
+
+    # ── Setup Wizard ────────────────────────────────────────────────────────
+
+    def _show_setup_wizard(self):
+        EMU_DEFAULTS = {
+            "MEmu":     r"C:\Program Files\Microvirt\MEmu",
+            "LDPlayer": r"C:\LDPlayer\LDPlayer9",
+            "Nox":      r"C:\Program Files (x86)\Nox",
+        }
+
+        win = ctk.CTkToplevel(self)
+        win.title("Welcome to Last Z Bot")
+        win.geometry("520x380")
+        win.resizable(False, False)
+        win.configure(fg_color=C["panel"])
+        win.grab_set()
+        win.focus_force()
+
+        # Center over main window
+        self.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() - 520) // 2
+        y = self.winfo_y() + (self.winfo_height() - 380) // 2
+        win.geometry(f"+{x}+{y}")
+
+        pad = {"padx": 30, "pady": 0}
+
+        ctk.CTkLabel(win, text="Welcome to Last Z Bot",
+                     font=("Segoe UI", 20, "bold"), text_color=C["accent"]).pack(pady=(30, 6))
+        ctk.CTkLabel(win, text="Let's get you set up. You can change these settings later\nin the Bot Settings tab.",
+                     font=("Segoe UI", 12), text_color=C["text2"], justify="center").pack(pady=(0, 24))
+
+        # Emulator selector
+        ctk.CTkLabel(win, text="Which emulator are you using?",
+                     font=("Segoe UI", 13, "bold"), text_color=C["text"]).pack(anchor="w", **pad)
+
+        emu_var = ctk.StringVar(value=self.bot_settings.get("emulator", "MEmu"))
+        path_var = ctk.StringVar(value=EMU_DEFAULTS.get(emu_var.get(), ""))
+
+        emu_menu = ctk.CTkOptionMenu(win, values=["MEmu", "LDPlayer", "Nox"],
+                                     variable=emu_var, width=460,
+                                     fg_color=C["card"], button_color=C["accent"],
+                                     button_hover_color=C["accent2"],
+                                     command=lambda v: path_var.set(EMU_DEFAULTS.get(v, "")))
+        emu_menu.pack(pady=(6, 18), **pad)
+
+        # Path field
+        ctk.CTkLabel(win, text="Emulator install path:",
+                     font=("Segoe UI", 13, "bold"), text_color=C["text"]).pack(anchor="w", **pad)
+
+        path_row = ctk.CTkFrame(win, fg_color="transparent")
+        path_row.pack(fill="x", pady=(6, 0), **pad)
+
+        path_entry = ctk.CTkEntry(path_row, textvariable=path_var, width=360,
+                                  fg_color=C["card"], border_color=C["border"])
+        path_entry.pack(side="left")
+
+        def browse():
+            from tkinter import filedialog
+            d = filedialog.askdirectory(title="Select emulator folder")
+            if d:
+                path_var.set(d)
+
+        ctk.CTkButton(path_row, text="Browse", width=80,
+                      fg_color=C["card"], hover_color=C["nav_sel"],
+                      border_width=1, border_color=C["border"],
+                      command=browse).pack(side="left", padx=(8, 0))
+
+        def finish():
+            self.bot_settings["emulator"] = emu_var.get()
+            self.bot_settings["emulator_path"] = path_var.get()
+            self._save_data()
+            self._refresh_bot_settings_ui()
+            win.destroy()
+
+        ctk.CTkButton(win, text="Get Started", width=200,
+                      fg_color=C["accent"], hover_color=C["accent2"],
+                      text_color="#000000", font=("Segoe UI", 13, "bold"),
+                      command=finish).pack(pady=28)
+
+    def _refresh_bot_settings_ui(self):
+        self._build_page_bot_settings()
 
     # ── Update Checker ─────────────────────────────────────────────────────
 
