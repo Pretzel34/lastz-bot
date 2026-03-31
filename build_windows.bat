@@ -10,7 +10,7 @@ if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
 if exist LastZBot.spec del /q LastZBot.spec
 
-python -m PyInstaller --noconfirm --onefile --name LastZBot ^
+python -m PyInstaller --noconfirm --onefile --name LastZBot --uac-admin ^
   --add-data "templates;templates" ^
   --add-data "tasks;tasks" ^
   --add-data "config.json;." ^
