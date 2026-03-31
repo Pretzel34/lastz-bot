@@ -39,8 +39,10 @@ jobs:
         run: choco install nsis -y
 
       - name: Build installer
-        run: makensis /DAPP_VERSION=${{ steps.version.outputs.version }} installer.nsi
-        shell: cmd
+        run: |
+          $env:PATH += ";C:\Program Files (x86)\NSIS"
+          makensis /DAPP_VERSION=${{ steps.version.outputs.version }} installer.nsi
+        shell: powershell
 
       - name: Create GitHub Release
         id: create_release
