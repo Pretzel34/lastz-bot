@@ -16,7 +16,7 @@ An automated bot for **Last Z** (Android game) that runs on emulators (MEmu, LDP
 
 ### From Installer (Recommended)
 
-1. Download the latest `LastZBot-vX.Y.Z.exe` from [Releases](https://github.com/Pretzel34/lastz-bot/releases)
+1. Download the latest `LastZBot-vX.Y.Z-Setup.exe` from [Releases](https://github.com/Pretzel34/lastz-bot/releases)
 2. Run the installer
 3. Launch the app from your Start Menu or Desktop shortcut
 4. Configure your emulator and farms in the **Bot Settings** tab
@@ -67,19 +67,13 @@ The executable will be created in `dist\LastZBot.exe`.
 
 ## Publishing a Release
 
-1. Update `version.py` with the new version (e.g., `0.2.0`)
-2. Commit your changes:
-   ```bash
-   git add .
-   git commit -m "Version 0.2.0"
-   ```
-3. Tag the commit:
-   ```bash
-   git tag v0.2.0
-   git push origin main --tags
-   ```
+Just push to `main` — GitHub Actions automatically bumps the version, builds the installer, and creates a GitHub Release.
 
-GitHub Actions will automatically build the `.exe` and create a GitHub Release with the installer.
+```bash
+git add .
+git commit -m "Your changes"
+git push
+```
 
 ## Troubleshooting
 
@@ -120,7 +114,7 @@ If you encounter a bug:
 
 ## License
 
-This project is private and for personal use only.
+This project is provided as-is for personal use. See [LICENSE](LICENSE) for details.
 
 ## FAQ
 
@@ -131,7 +125,7 @@ A: The bot only automates clicks and swipes that a human could do manually. It d
 A: Windows is currently fully supported. macOS support is in progress (will require Android SDK emulator or Genymotion). Linux is not planned.
 
 **Q: How do I update?**  
-A: On startup, the app checks GitHub Releases. If a newer version is available, you'll get a prompt to download and install it.
+A: On startup, the app automatically checks GitHub Releases and silently downloads and installs any newer version.
 
-**Q: Can I distribute this to other players?**  
-A: No, this is a private tool. You can share the source code with friends, but not compiled binaries.
+**Q: Can I share this with other players?**
+A: Yes — share the GitHub link or the installer from the [Releases](https://github.com/Pretzel34/lastz-bot/releases) page.

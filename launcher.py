@@ -11,6 +11,7 @@ Emulator index is 0-based:
 """
 
 import os
+import shutil
 import time
 import subprocess
 import logging
@@ -45,6 +46,7 @@ EMULATOR_PROFILES = {
         "window_title":      "(MEmu - {n})",
         "window_title_bare": "MEmu",
         "cli_exe":           "memuc.exe",
+        "adb_exe":           "adb.exe",
         "cli_start":         ["start", "-i", "{index}"],
         "cli_stop":          ["stop",  "-i", "{index}"],
         "cli_list":          ["listvms"],
@@ -57,6 +59,7 @@ EMULATOR_PROFILES = {
         "window_title":      "LDPlayer - {n}",
         "window_title_bare": "LDPlayer",
         "cli_exe":           "ldconsole.exe",
+        "adb_exe":           "adb.exe",
         "cli_start":         ["launch", "--index", "{index}"],
         "cli_stop":          ["quit",   "--index", "{index}"],
         "cli_list":          ["list2"],
@@ -69,6 +72,7 @@ EMULATOR_PROFILES = {
         "window_title":      "NoxPlayer",
         "window_title_bare": "NoxPlayer",
         "cli_exe":           "NoxConsole.exe",
+        "adb_exe":           "nox_adb.exe",
         "cli_start":         ["launch", "-index:{index}"],
         "cli_stop":          ["quit",   "-index:{index}"],
         "cli_list":          ["list"],
@@ -80,6 +84,65 @@ EMULATOR_PROFILES = {
 def get_profile(emulator_type: str) -> dict:
     """Return the emulator profile, defaulting to MEmu if unknown."""
     return EMULATOR_PROFILES.get(emulator_type, EMULATOR_PROFILES["MEmu"])
+
+
+# Common subfolder candidates per emulator, verified by the CLI executable.
+_INSTALL_SEARCH = {
+    "MEmu": {
+        "verify_exe": "memuc.exe",
+        "subdirs": [
+            r"Program Files\Microvirt\MEmu",
+            r"Program Files (x86)\Microvirt\MEmu",
+            r"Microvirt\MEmu",
+            r"MEmu",
+        ],
+        "example": r"D:\Program Files\Microvirt\MEmu",
+    },
+    "LDPlayer": {
+        "verify_exe": "ldconsole.exe",
+        "subdirs": [
+            r"LDPlayer\LDPlayer9",
+            r"LDPlayer\LDPlayer4",
+            r"Program Files\LDPlayer\LDPlayer9",
+            r"Program Files\LDPlayer\LDPlayer4",
+            r"LDPlayer9",
+            r"LDPlayer4",
+        ],
+        "example": r"D:\LDPlayer\LDPlayer9",
+    },
+    "Nox": {
+        "verify_exe": "NoxConsole.exe",
+        "subdirs": [
+            r"Program Files (x86)\Nox\bin",
+            r"Program Files\Nox\bin",
+            r"BigNox\NoxVM",
+            r"Nox\bin",
+        ],
+        "example": r"D:\Program Files (x86)\Nox\bin",
+    },
+}
+
+
+def find_emulator_install(emulator_type: str) -> str | None:
+    """
+    Search common drive letters and install locations for the given emulator.
+    Verifies the path by checking the CLI executable exists inside it.
+    Returns the install folder path if found, None otherwise.
+    """
+    spec = _INSTALL_SEARCH.get(emulator_type)
+    if not spec:
+        return None
+    for drive in ["C", "D", "E", "F", "G"]:
+        for subdir in spec["subdirs"]:
+            candidate = os.path.join(f"{drive}:\\", subdir)
+            if os.path.isfile(os.path.join(candidate, spec["verify_exe"])):
+                return candidate
+    return None
+
+
+def emulator_path_example(emulator_type: str) -> str:
+    """Return a human-readable example install path for the given emulator."""
+    return _INSTALL_SEARCH.get(emulator_type, {}).get("example", "")
 
 
 def index_to_port(index: int, emulator_type: str = "MEmu") -> int:
@@ -126,7 +189,6 @@ class EmulatorLauncher:
         self.game_timeout  = game_timeout
         self.package       = package
         self.activity      = activity
-        self.adb_path      = adb_path
         self.log_callback  = log_callback
         self.logger        = logging.getLogger("EmulatorLauncher")
         self._bots: dict[int, object] = {}  # index -> ADBWrapper
@@ -144,6 +206,15 @@ class EmulatorLauncher:
             }
             self.install_path = install_path or defaults.get(emulator_type, "")
             self.cli_path     = os.path.join(self.install_path, self.profile["cli_exe"])
+
+        # Resolve ADB path — if "adb" not in PATH, fall back to emulator-bundled adb
+        if adb_path == "adb" and not shutil.which("adb"):
+            bundled = os.path.join(self.install_path, self.profile.get("adb_exe", "adb.exe"))
+            if os.path.exists(bundled):
+                adb_path = bundled
+                self.logger.info(f"[Launcher] 'adb' not in PATH — using bundled ADB: {bundled}")
+
+        self.adb_path = adb_path
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -302,7 +373,7 @@ class EmulatorLauncher:
 
     # ── CLI Commands ──────────────────────────────────────────────────────
 
-    def _run_cli(self, *args) -> tuple[int, str]:
+    def _run_cli(self, *args, timeout: int = 30) -> tuple[int, str]:
         """Run the emulator CLI tool. Returns (returncode, output)."""
         try:
             si = subprocess.STARTUPINFO()
@@ -310,7 +381,7 @@ class EmulatorLauncher:
             si.wShowWindow = 0  # SW_HIDE
             result = subprocess.run(
                 [self.cli_path] + [str(a) for a in args],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, timeout=timeout,
                 startupinfo=si
             )
             output = (result.stdout + result.stderr).strip()
@@ -331,7 +402,7 @@ class EmulatorLauncher:
     def _start_instance_by_cli(self, cli_index: int) -> bool:
         """Start an emulator instance using the raw CLI index (as shown in the list command)."""
         args = [a.format(index=cli_index) for a in self.profile["cli_start"]]
-        code, out = self._run_cli(*args)
+        code, out = self._run_cli(*args, timeout=90)
         self._log(f"[Launcher] start CLI-{cli_index} (code={code}): {out.strip()}")
         if code != 0:
             self._log(f"[Launcher] ⚠ CLI path: {self.cli_path}", "error")

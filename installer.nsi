@@ -34,6 +34,9 @@ Section "Install"
   CreateDirectory "${STARTMENU_DIR}"
   CreateShortCut  "${STARTMENU_DIR}\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}"
 
+  ; Desktop shortcut
+  CreateShortCut  "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}"
+
   ; Write uninstaller
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
@@ -59,6 +62,7 @@ Section "Uninstall"
 
   Delete "${STARTMENU_DIR}\${APP_NAME}.lnk"
   RMDir  "${STARTMENU_DIR}"
+  Delete "$DESKTOP\${APP_NAME}.lnk"
 
   DeleteRegKey HKLM "${REG_KEY}"
   DeleteRegValue HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers" \

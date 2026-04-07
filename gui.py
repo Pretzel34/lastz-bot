@@ -42,7 +42,7 @@ LASTZ_ACT  = "com.im30.aps.debug.UnityPlayerActivityCustom"
 try:
     from bot_engine import BotEngine, EngineState, load_config, save_config
     from action_executor import ActionStatus
-    from launcher import EmulatorLauncher, MEmuLauncher, index_to_port, get_profile
+    from launcher import EmulatorLauncher, MEmuLauncher, index_to_port, get_profile, find_emulator_install, emulator_path_example
     BOT_AVAILABLE = True
 except ImportError as e:
     BOT_AVAILABLE = False
@@ -1903,9 +1903,19 @@ class BotApp(ctk.CTk):
             except (ValueError, TypeError):
                 return  # ignore invalid input mid-typing
         self.bot_settings[key] = value
-        # When emulator type changes, rebuild the bot settings page so the path
-        # label updates (e.g. "MEmu Path" → "LDPlayer Path")
+        # When emulator type changes, auto-detect install path then rebuild the page
         if key == "emulator":
+            found = find_emulator_install(value)
+            if found:
+                self.bot_settings["emulator_path"] = found
+                self._log(f"[Bot Settings] {value} found at: {found}", "success")
+            else:
+                example = emulator_path_example(value)
+                self._log(
+                    f"[Bot Settings] {value} not found automatically. "
+                    f"Set the path manually in Bot Settings. Example: {example}",
+                    "warn",
+                )
             self._build_page_bot_settings()
 
     def _browse_path(self, key: str, var: ctk.StringVar):
@@ -1938,22 +1948,16 @@ class BotApp(ctk.CTk):
     # ── Setup Wizard ────────────────────────────────────────────────────────
 
     def _show_setup_wizard(self):
-        EMU_DEFAULTS = {
-            "MEmu":     r"C:\Program Files\Microvirt\MEmu",
-            "LDPlayer": r"C:\LDPlayer\LDPlayer9",
-            "Nox":      r"C:\Program Files (x86)\Nox",
-        }
-
         win = ctk.CTkToplevel(self)
         win.title("Welcome to Last Z Bot")
-        win.geometry("500x420")
+        win.geometry("500x460")
         win.resizable(False, False)
         win.configure(fg_color=C["panel"])
 
         # Center over main window
         self.update_idletasks()
         x = self.winfo_x() + (self.winfo_width() - 500) // 2
-        y = self.winfo_y() + (self.winfo_height() - 420) // 2
+        y = self.winfo_y() + (self.winfo_height() - 460) // 2
         win.geometry(f"+{x}+{y}")
         win.after(100, win.grab_set)
 
@@ -1969,13 +1973,13 @@ class BotApp(ctk.CTk):
         ctk.CTkLabel(body, text="Which emulator are you using?",
                      font=("Segoe UI", 13, "bold"), text_color=C["text"]).pack(anchor="w", pady=(0, 6))
 
-        emu_var = ctk.StringVar(value=self.bot_settings.get("emulator", "MEmu"))
-        path_var = ctk.StringVar(value=EMU_DEFAULTS.get(emu_var.get(), ""))
+        emu_var  = ctk.StringVar(value=self.bot_settings.get("emulator", "MEmu"))
+        path_var = ctk.StringVar(value="")
 
         ctk.CTkOptionMenu(body, values=["MEmu", "LDPlayer", "Nox"],
                           variable=emu_var, fg_color=C["card"],
                           button_color=C["accent"], button_hover_color=C["accent2"],
-                          command=lambda v: path_var.set(EMU_DEFAULTS.get(v, ""))
+                          command=lambda v: _detect(v)
                           ).pack(fill="x", pady=(0, 18))
 
         # Path field
@@ -1984,7 +1988,6 @@ class BotApp(ctk.CTk):
 
         path_row = ctk.CTkFrame(body, fg_color="transparent")
         path_row.pack(fill="x")
-        path_row.columnconfigure(0, weight=1)
 
         path_entry = ctk.CTkEntry(path_row, textvariable=path_var,
                                   fg_color=C["card"], border_color=C["border"])
@@ -1995,11 +1998,40 @@ class BotApp(ctk.CTk):
             d = filedialog.askdirectory(title="Select emulator folder")
             if d:
                 path_var.set(d)
+                status_label.configure(text="")
 
         ctk.CTkButton(path_row, text="Browse", width=80,
                       fg_color=C["card"], hover_color=C["nav_sel"],
                       border_width=1, border_color=C["border"],
                       command=browse).pack(side="left", padx=(8, 0))
+
+        # Status label — shown below the path row after auto-detect
+        status_label = ctk.CTkLabel(body, text="", font=("Segoe UI", 11),
+                                    wraplength=420, justify="left")
+        status_label.pack(anchor="w", pady=(6, 0))
+
+        def _detect(emu_type: str):
+            found = find_emulator_install(emu_type)
+            if found:
+                path_var.set(found)
+                status_label.configure(
+                    text=f"✓ Found automatically: {found}",
+                    text_color="#4caf50",
+                )
+            else:
+                path_var.set("")
+                example = emulator_path_example(emu_type)
+                status_label.configure(
+                    text=(
+                        f"Could not find {emu_type} automatically.\n"
+                        f"Use Browse to locate your install folder.\n"
+                        f"Example: {example}"
+                    ),
+                    text_color="#ff9800",
+                )
+
+        # Run detection immediately for the default emulator
+        _detect(emu_var.get())
 
         def finish():
             self.bot_settings["emulator"] = emu_var.get()
@@ -2037,19 +2069,29 @@ class BotApp(ctk.CTk):
             remote = result["remote_version"]
             asset_url = result["asset_url"]
 
-            def prompt():
-                if messagebox.askyesno(
-                    "Update Available",
-                    f"A new version ({remote}) is available. Download and install?",
-                ):
-                    file_name = f"LastZBot-{remote}-Setup.exe" if sys.platform.startswith("win") else f"{GITHUB_REPO}-{remote}.dmg"
-                    success = download_and_launch(asset_url, file_name, args=["/S"])
-                    if not success:
-                        messagebox.showerror("Update Failed", "Failed to download the installer.")
-                    else:
-                        self.destroy()
+            self.after(0, lambda: self._log(f"Update {remote} found — downloading in background...", "info"))
 
-            self.after(0, prompt)
+            file_name = f"LastZBot-{remote}-Setup.exe" if sys.platform.startswith("win") else f"{GITHUB_REPO}-{remote}.dmg"
+            success = download_and_launch(asset_url, file_name, args=["/S"])
+
+            if not success:
+                self.after(0, lambda: self._log("Update download failed — will retry next launch.", "warn"))
+                return
+
+            # Stop all running engines before the installer replaces the exe
+            def apply_update():
+                self._log(f"Update {remote} downloaded — installing now...", "success")
+                for engine in self.engines.values():
+                    try:
+                        if engine.state == EngineState.RUNNING:
+                            engine.stop()
+                        engine.disconnect()
+                    except Exception:
+                        pass
+                self._save_data()
+                self.destroy()
+
+            self.after(0, apply_update)
         except Exception:
             pass
 
@@ -2068,5 +2110,18 @@ class BotApp(ctk.CTk):
 
 
 if __name__ == "__main__":
+    # Single-instance guard — prevent multiple GUI windows running at once.
+    if sys.platform.startswith("win"):
+        import ctypes
+        _mutex = ctypes.windll.kernel32.CreateMutexW(None, True, "LastZBot_SingleInstance")
+        if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                "Last Z Bot is already running.\nCheck your taskbar or system tray.",
+                "Already Running",
+                0x40 | 0x1000,  # MB_ICONINFORMATION | MB_SYSTEMMODAL
+            )
+            sys.exit(0)
+
     app = BotApp()
     app.mainloop()
