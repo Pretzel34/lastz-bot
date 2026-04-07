@@ -15,6 +15,7 @@ Requirements:
 """
 
 import json
+import re
 import sys
 import threading
 import tkinter as tk
@@ -27,6 +28,9 @@ import customtkinter as ctk
 import version
 from paths import ensure_app_dir, get_farms_path, get_resource_dir
 from updater import check_for_update, download_and_launch
+from emulator_config import (
+    find_memu_config, check_memu_settings, apply_memu_fixes, is_memu_running,
+)
 
 # Update these values for your repository.
 GITHUB_OWNER = "Pretzel34"
@@ -675,6 +679,24 @@ class BotApp(ctk.CTk):
         card3 = self._card(scroll, "Vision")
         self._setting_row(card3, "Confidence Threshold (0.5–1.0)", "number", "vision_confidence")
 
+        # Only show emulator settings check for MEmu (other emulators added later)
+        if emu_type == "MEmu":
+            card_check = self._card(scroll, "Emulator Settings Check")
+            ctk.CTkLabel(
+                card_check,
+                text=(
+                    "Verify that each MEmu instance has the correct settings for the bot\n"
+                    "(resolution, root mode, CPU, RAM, render mode, etc.).\n"
+                    "MEmu must be fully closed before applying any fixes."
+                ),
+                font=("Segoe UI", 12), text_color=C["subtext"],
+                justify="left", anchor="w",
+            ).pack(anchor="w", pady=(0, 10))
+            self._btn(
+                card_check, "🔍  Verify & Fix Emulator Settings",
+                self._verify_emulator_settings, C["accent2"],
+            ).pack(anchor="w")
+
         save_row = ctk.CTkFrame(scroll, fg_color="transparent")
         save_row.pack(fill="x", pady=12)
         self._btn(save_row, "💾  SAVE SETTINGS",
@@ -693,6 +715,165 @@ class BotApp(ctk.CTk):
         except Exception:
             pass
         self._log("Bot settings saved.", "success")
+
+    # ── Emulator Settings Verify & Fix ───────────────────────────────────────
+
+    def _verify_emulator_settings(self):
+        """Check all enabled MEmu farms against required settings and offer to auto-fix."""
+        from launcher import find_emulator_install
+
+        # Guard: bot must not be running
+        any_running = any(
+            hasattr(e, "state") and e.state.value == "running"
+            for e in self.engines.values()
+        )
+        if any_running:
+            messagebox.showwarning(
+                "Bot Running",
+                "Please stop the bot before verifying emulator settings.",
+            )
+            return
+
+        # Guard: MEmu must be closed
+        if is_memu_running():
+            messagebox.showwarning(
+                "MEmu Is Open",
+                "MEmu must be fully closed before settings can be checked or changed.\n\n"
+                "Please stop all MEmu instances and close the MEmu manager, then try again.",
+            )
+            return
+
+        install_path = self.bot_settings.get("emulator_path") or find_emulator_install("MEmu")
+        if not install_path:
+            messagebox.showerror(
+                "MEmu Not Found",
+                "Could not find the MEmu installation folder.\n"
+                "Set the correct path in Bot Settings → MEmu Path.",
+            )
+            return
+
+        enabled_farms = [f for f in self.farms if f.get("enabled", True)]
+        if not enabled_farms:
+            messagebox.showinfo("No Farms", "No enabled farms to check.")
+            return
+
+        # Collect results for every enabled farm
+        farm_results = []
+        for farm in enabled_farms:
+            cli_index = farm["emu_index"] - 1  # 1-based → 0-based
+            config_path = find_memu_config(install_path, cli_index)
+            if not config_path:
+                farm_results.append((farm["name"], cli_index, None, []))
+                continue
+            checks = check_memu_settings(config_path)
+            farm_results.append((farm["name"], cli_index, config_path, checks))
+
+        self._show_settings_check_dialog(farm_results)
+
+    def _show_settings_check_dialog(self, farm_results: list):
+        """Show a dialog with per-farm check results and an option to auto-fix."""
+        win = ctk.CTkToplevel(self)
+        win.title("Emulator Settings Check")
+        win.geometry("640x560")
+        win.resizable(True, True)
+        win.configure(fg_color=C["panel"])
+        self.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width()  - 640) // 2
+        y = self.winfo_y() + (self.winfo_height() - 560) // 2
+        win.geometry(f"+{x}+{y}")
+        win.after(100, win.grab_set)
+
+        ctk.CTkLabel(win, text="Emulator Settings Check",
+                     font=("Segoe UI", 16, "bold"), text_color=C["text"]).pack(pady=(18, 4))
+        ctk.CTkLabel(win, text="Green = correct   Red = needs fixing",
+                     font=("Segoe UI", 12), text_color=C["subtext"]).pack(pady=(0, 10))
+
+        scroll = ctk.CTkScrollableFrame(win, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=16)
+
+        total_issues = 0
+
+        for farm_name, cli_index, config_path, checks in farm_results:
+            # Farm header
+            hdr = ctk.CTkFrame(scroll, fg_color=C["card"], corner_radius=8)
+            hdr.pack(fill="x", pady=(8, 2))
+            ctk.CTkLabel(hdr, text=f"  {farm_name}  (MEmu instance {cli_index})",
+                         font=("Segoe UI", 13, "bold"), text_color=C["text"],
+                         anchor="w").pack(fill="x", padx=8, pady=6)
+
+            if config_path is None:
+                ctk.CTkLabel(scroll,
+                             text=f"  ✗ Config file not found for instance {cli_index}",
+                             font=("Segoe UI", 12), text_color=C["error"], anchor="w",
+                             ).pack(fill="x", padx=8)
+                continue
+
+            for chk in checks:
+                ok = chk["ok"]
+                color = C.get("success", "#4caf50") if ok else C.get("error", "#f44336")
+                icon  = "✓" if ok else "✗"
+                if not ok:
+                    total_issues += 1
+                    text = (f"  {icon}  {chk['label']}  —  "
+                            f"current: {chk['actual'] or '(not set)'}  →  required: {chk['required']}\n"
+                            f"        Fix in MEmu: {chk['hint']}")
+                else:
+                    text = f"  {icon}  {chk['label']}"
+
+                ctk.CTkLabel(scroll, text=text, font=("Segoe UI", 11),
+                             text_color=color, anchor="w", justify="left",
+                             wraplength=580).pack(fill="x", padx=8, pady=1)
+
+        # Bottom buttons
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=14)
+
+        ctk.CTkButton(btn_row, text="Close", width=100,
+                      fg_color=C["card"], hover_color=C["nav_sel"],
+                      border_width=1, border_color=C["border"],
+                      command=win.destroy).pack(side="right", padx=(6, 0))
+
+        if total_issues > 0:
+            def do_fix():
+                fixed_total = 0
+                for farm_name, cli_index, config_path, checks in farm_results:
+                    if not config_path:
+                        continue
+                    issues = [c for c in checks if not c["ok"]]
+                    if not issues:
+                        continue
+                    # Re-check MEmu is still closed before writing
+                    if is_memu_running():
+                        messagebox.showwarning(
+                            "MEmu Opened",
+                            "MEmu was opened while this dialog was open. "
+                            "Please close it and try again.",
+                            parent=win,
+                        )
+                        return
+                    n = apply_memu_fixes(config_path, issues)
+                    fixed_total += n
+                    self._log(
+                        f"[Settings Fix] {farm_name}: fixed {n} setting(s)", "success")
+
+                messagebox.showinfo(
+                    "Done",
+                    f"Fixed {fixed_total} setting(s) across {len(farm_results)} farm(s).\n\n"
+                    "Start MEmu for the changes to take effect.",
+                    parent=win,
+                )
+                win.destroy()
+
+            ctk.CTkButton(
+                btn_row,
+                text=f"⚡  Fix {total_issues} Issue(s) Automatically",
+                fg_color=C["accent"], hover_color=C["accent2"],
+                command=do_fix,
+            ).pack(side="right", padx=(6, 0))
+        else:
+            ctk.CTkLabel(btn_row, text="✓  All settings are correct!",
+                         font=("Segoe UI", 13, "bold"),
+                         text_color=C.get("success", "#4caf50")).pack(side="right")
 
     # ══════════════════════════════════════════════════════════════════════
     # PAGE: Farm Settings
@@ -1451,6 +1632,23 @@ class BotApp(ctk.CTk):
                     stop_event=engine._stop_event,
                 )
                 engine.executor = executor
+
+                # ADB resolution check — warn if not 540x960
+                try:
+                    size_raw = bot._device.shell("wm size")
+                    # Output is like "Physical size: 540x960" or "Override size: 540x960"
+                    m = re.search(r'(\d+)x(\d+)', size_raw)
+                    if m:
+                        w, h = int(m.group(1)), int(m.group(2))
+                        if w != 540 or h != 960:
+                            self.after(0, lambda cw=w, ch=h: self._log(
+                                f"  ⚠ Resolution is {cw}x{ch} — bot requires 540x960. "
+                                f"Go to Bot Settings → Verify & Fix Emulator Settings.", "warn"))
+                    else:
+                        self.after(0, lambda: self._log(
+                            "  ⚠ Could not read screen resolution via ADB.", "warn"))
+                except Exception:
+                    pass
 
                 # Recording
                 if self._record_runs:
