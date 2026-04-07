@@ -826,7 +826,7 @@ class BotApp(ctk.CTk):
         x = self.winfo_x() + (self.winfo_width()  - 640) // 2
         y = self.winfo_y() + (self.winfo_height() - 560) // 2
         win.geometry(f"+{x}+{y}")
-        win.after(100, win.grab_set)
+        win.after(100, lambda: (win.grab_set(), win.lift(), win.focus_force()))
 
         ctk.CTkLabel(win, text="Emulator Settings Check",
                      font=("Segoe UI", 16, "bold"), text_color=C["text"]).pack(pady=(18, 4))
@@ -2228,7 +2228,7 @@ class BotApp(ctk.CTk):
         x = self.winfo_x() + (self.winfo_width() - 500) // 2
         y = self.winfo_y() + (self.winfo_height() - 460) // 2
         win.geometry(f"+{x}+{y}")
-        win.after(100, win.grab_set)
+        win.after(100, lambda: (win.grab_set(), win.lift(), win.focus_force()))
 
         ctk.CTkLabel(win, text="Welcome to Last Z Bot",
                      font=("Segoe UI", 20, "bold"), text_color=C["accent"]).pack(pady=(30, 6))
