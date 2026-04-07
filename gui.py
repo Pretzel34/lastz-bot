@@ -679,9 +679,8 @@ class BotApp(ctk.CTk):
         card3 = self._card(scroll, "Vision")
         self._setting_row(card3, "Confidence Threshold (0.5–1.0)", "number", "vision_confidence")
 
-        # Only show emulator settings check for MEmu (other emulators added later)
+        card_check = self._card(scroll, "Emulator Settings Check")
         if emu_type == "MEmu":
-            card_check = self._card(scroll, "Emulator Settings Check")
             ctk.CTkLabel(
                 card_check,
                 text=(
@@ -689,13 +688,44 @@ class BotApp(ctk.CTk):
                     "(resolution, root mode, CPU, RAM, render mode, etc.).\n"
                     "MEmu must be fully closed before applying any fixes."
                 ),
-                font=("Segoe UI", 12), text_color=C["subtext"],
+                font=("Segoe UI", 12), text_color=C["muted"],
                 justify="left", anchor="w",
             ).pack(anchor="w", pady=(0, 10))
             self._btn(
                 card_check, "🔍  Verify & Fix Emulator Settings",
                 self._verify_emulator_settings, C["accent2"],
             ).pack(anchor="w")
+        else:
+            REQUIRED_SETTINGS = [
+                ("Resolution",           "W: 540  H: 960  DPI: 180"),
+                ("Root mode",            "On"),
+                ("CPU / RAM",            "4 cores  /  4096 MB"),
+                ("Frame rate",           "20 fps"),
+                ("Render mode",          "DirectX (or OpenGL if DirectX unavailable)"),
+                ("ASTC decode",          "Auto"),
+                ("ASTC cache",           "On"),
+                ("GPU mem optimization", "On"),
+                ("Audio driver",         "Mute / Null"),
+                ("Microphone",           "Disabled"),
+            ]
+            ctk.CTkLabel(
+                card_check,
+                text=(
+                    f"Automatic settings check is not yet supported for {emu_type}.\n"
+                    "Please verify the following settings in your emulator manually:"
+                ),
+                font=("Segoe UI", 12), text_color=C["muted"],
+                justify="left", anchor="w",
+            ).pack(anchor="w", pady=(0, 8))
+            for setting, value in REQUIRED_SETTINGS:
+                row = ctk.CTkFrame(card_check, fg_color="transparent")
+                row.pack(fill="x", pady=1)
+                ctk.CTkLabel(row, text=f"  • {setting}",
+                             font=("Segoe UI", 12, "bold"), text_color=C["text"],
+                             width=200, anchor="w").pack(side="left")
+                ctk.CTkLabel(row, text=value,
+                             font=("Segoe UI", 12), text_color=C["muted"],
+                             anchor="w").pack(side="left")
 
         save_row = ctk.CTkFrame(scroll, fg_color="transparent")
         save_row.pack(fill="x", pady=12)
@@ -786,7 +816,7 @@ class BotApp(ctk.CTk):
         ctk.CTkLabel(win, text="Emulator Settings Check",
                      font=("Segoe UI", 16, "bold"), text_color=C["text"]).pack(pady=(18, 4))
         ctk.CTkLabel(win, text="Green = correct   Red = needs fixing",
-                     font=("Segoe UI", 12), text_color=C["subtext"]).pack(pady=(0, 10))
+                     font=("Segoe UI", 12), text_color=C["muted"]).pack(pady=(0, 10))
 
         scroll = ctk.CTkScrollableFrame(win, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=16)
