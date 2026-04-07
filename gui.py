@@ -696,18 +696,28 @@ class BotApp(ctk.CTk):
                 self._verify_emulator_settings, C["accent2"],
             ).pack(anchor="w")
         else:
-            REQUIRED_SETTINGS = [
-                ("Resolution",           "W: 540  H: 960  DPI: 180"),
-                ("Root mode",            "On"),
-                ("CPU / RAM",            "4 cores  /  4096 MB"),
-                ("Frame rate",           "20 fps"),
-                ("Render mode",          "DirectX (or OpenGL if DirectX unavailable)"),
-                ("ASTC decode",          "Auto"),
-                ("ASTC cache",           "On"),
-                ("GPU mem optimization", "On"),
-                ("Audio driver",         "Mute / Null"),
-                ("Microphone",           "Disabled"),
-            ]
+            # Per-emulator setting hints with menu paths
+            if emu_type == "LDPlayer":
+                REQUIRED_SETTINGS = [
+                    ("Resolution",           "540 x 960,  DPI 180",              "Settings → Display → Screen resolution"),
+                    ("Frame rate",           "20 fps",                           "Settings → Display → Frame rate"),
+                    ("CPU / RAM",            "4 cores  /  4096 MB",              "Settings → Advanced → CPU & Memory"),
+                    ("Root mode",            "On",                               "Settings → Advanced → Root"),
+                    ("Render mode",          "OpenGL",                           "Settings → Advanced → Rendering"),
+                    ("Audio",                "Mute / disabled",                  "Settings → Advanced → Sound settings"),
+                ]
+            else:  # Nox
+                REQUIRED_SETTINGS = [
+                    ("Resolution",           "540 x 960,  DPI 180",              "Settings → General → Resolution"),
+                    ("Frame rate",           "20 fps",                           "Settings → General → Frame rate"),
+                    ("CPU / RAM",            "4 cores  /  4096 MB",              "Settings → General → CPU & Memory"),
+                    ("Root mode",            "On",                               "Settings → General → Root"),
+                    ("Render mode",          "DirectX",                          "Settings → General → Graphics rendering"),
+                    ("GPU optimization",     "On",                               "Settings → General → Enable high performance GPU"),
+                    ("Audio",                "Mute / disabled",                  "Settings → General → Sound"),
+                    ("Microphone",           "Disabled",                         "Settings → General → Microphone"),
+                ]
+
             ctk.CTkLabel(
                 card_check,
                 text=(
@@ -717,14 +727,19 @@ class BotApp(ctk.CTk):
                 font=("Segoe UI", 12), text_color=C["muted"],
                 justify="left", anchor="w",
             ).pack(anchor="w", pady=(0, 8))
-            for setting, value in REQUIRED_SETTINGS:
+
+            for row_data in REQUIRED_SETTINGS:
+                setting, value, menu_path = row_data
                 row = ctk.CTkFrame(card_check, fg_color="transparent")
-                row.pack(fill="x", pady=1)
+                row.pack(fill="x", pady=2)
                 ctk.CTkLabel(row, text=f"  • {setting}",
                              font=("Segoe UI", 12, "bold"), text_color=C["text"],
-                             width=200, anchor="w").pack(side="left")
+                             width=180, anchor="w").pack(side="left")
                 ctk.CTkLabel(row, text=value,
-                             font=("Segoe UI", 12), text_color=C["muted"],
+                             font=("Segoe UI", 12), text_color=C["text"],
+                             width=160, anchor="w").pack(side="left")
+                ctk.CTkLabel(row, text=menu_path,
+                             font=("Segoe UI", 11), text_color=C["muted"],
                              anchor="w").pack(side="left")
 
         save_row = ctk.CTkFrame(scroll, fg_color="transparent")
