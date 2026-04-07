@@ -1398,11 +1398,27 @@ class BotApp(ctk.CTk):
 
                 post_wait = int(float(self.bot_settings.get("post_launch_wait", 5)))
 
-                # Step 1 — launch emulator + Last Z
+                # Step 1 — create engine early so stop button works during launch
+                from vision import VisionEngine
+                from action_executor import ActionExecutor
+
+                engine = BotEngine("config.json")
+                engine.config["emulator"]["ports"] = [port]
+                engine.config["emulator"]["type"]  = emu_type
+                engine.on_log          = lambda m: self.after(0, lambda msg=m: self._log(msg))
+                engine.on_state_change = lambda s: self.after(0, self._refresh_stats_table)
+                engine.on_stats_update = lambda s: self.after(0, self._refresh_stats_table)
+                self.engines[farm["emu_index"]] = engine  # register now so stop button can signal it
+
+                # Step 2 — launch emulator + Last Z
                 launcher = self._make_launcher(launch_log)
                 ok = launcher.launch_and_connect(index=idx, wait_for_game=True)
                 if not ok:
                     self.after(0, lambda: self._log(f"✗ {name}: emulator launch failed", "error"))
+                    self.after(0, self._stop_timer)
+                    return
+                if engine._stop_event.is_set():
+                    self.after(0, lambda: self._log(f"■ {name}: stopped during launch", "warn"))
                     self.after(0, self._stop_timer)
                     return
                 if post_wait > 0:
@@ -1410,28 +1426,20 @@ class BotApp(ctk.CTk):
                         f"  ⏱ Post-launch wait {s}s for game to settle...", "info"))
                     import time as _time
                     _time.sleep(post_wait)
+                if engine._stop_event.is_set():
+                    self.after(0, lambda: self._log(f"■ {name}: stopped during post-launch wait", "warn"))
+                    self.after(0, self._stop_timer)
+                    return
                 if self.bot_settings.get("auto_arrange", True):
                     with self._arrange_lock:
                         self._arrange_memu_windows()
 
-                # Step 2 — build engine using the live bot connection
-                from vision import VisionEngine
-                from action_executor import ActionExecutor
-
+                # Step 3 — wire bot connection to engine/executor
                 bot    = launcher.get_bot(idx)
                 vision = VisionEngine(
                     confidence_threshold=float(self.bot_settings.get("vision_confidence", 0.8)))
-
-                # Engine must be created first so we can pass its stop_event to the executor.
-                # Without this, engine.stop() sets the event but the executor never sees it.
-                engine = BotEngine("config.json")
-                engine.config["emulator"]["ports"] = [port]
-                engine.config["emulator"]["type"]  = emu_type
                 engine.bot    = bot
                 engine.vision = vision
-                engine.on_log          = lambda m: self.after(0, lambda msg=m: self._log(msg))
-                engine.on_state_change = lambda s: self.after(0, self._refresh_stats_table)
-                engine.on_stats_update = lambda s: self.after(0, self._refresh_stats_table)
 
                 executor = ActionExecutor(
                     bot=bot,
@@ -1439,10 +1447,9 @@ class BotApp(ctk.CTk):
                     template_dir=str(get_resource_dir() / self.bot_settings.get("template_dir", "templates")),
                     log_callback=lambda m: self.after(0, lambda msg=m: self._log(msg)),
                     emulator_type=emu_type,
-                    stop_event=engine._stop_event,  # wire stop signal to executor
+                    stop_event=engine._stop_event,
                 )
                 engine.executor = executor
-                self.engines[farm["emu_index"]] = engine
 
                 # Recording
                 if self._record_runs:
@@ -1494,6 +1501,11 @@ class BotApp(ctk.CTk):
                 if not tasks:
                     self.after(0, lambda: self._log(
                         f"⚠ {name}: no tasks found in tasks/ — check your JSON files", "warn"))
+                    return
+
+                if engine._stop_event.is_set():
+                    self.after(0, lambda: self._log(f"■ {name}: stopped before tasks started", "warn"))
+                    self.after(0, self._stop_timer)
                     return
 
                 engine.load_tasks(tasks)
