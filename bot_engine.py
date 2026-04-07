@@ -347,11 +347,19 @@ class BotEngine:
         self._log("Bot started")
 
     def stop(self):
-        """Signal the bot to stop after the current action."""
+        """Signal the bot to stop immediately."""
         self._log("Stop requested...")
         self._stop_event.set()
         self._pause_event.set()  # unpause so thread can see stop
         self._set_state(EngineState.STOPPING)
+        # Disconnect ADB to break any in-flight blocking socket call immediately.
+        # The _run_loop exception handler will treat the resulting error as a
+        # clean stop (not ERROR) when _stop_event is set.
+        if self.bot:
+            try:
+                self.bot.disconnect()
+            except Exception:
+                pass
 
     def pause(self):
         """Pause execution after the current action."""
@@ -397,10 +405,14 @@ class BotEngine:
                 self._interruptible_sleep(loop_delay)
 
         except Exception as e:
-            self._log(f"FATAL ERROR in bot loop: {e}")
-            self._set_state(EngineState.ERROR)
-            self.stats.errors.append(str(e))
-            return
+            if self._stop_event.is_set():
+                # Exception was caused by ADB disconnect on stop — treat as clean stop
+                pass
+            else:
+                self._log(f"FATAL ERROR in bot loop: {e}")
+                self._set_state(EngineState.ERROR)
+                self.stats.errors.append(str(e))
+                return
 
         self.stats.end_time = datetime.now()
         self._log(f"Bot stopped. {self.stats.summary()}")

@@ -199,6 +199,7 @@ class BotApp(ctk.CTk):
         self.bot_settings: dict = self._default_bot_settings()
         self.engines: dict[int, BotEngine] = {}
         self._active_farm_idx: int = 0
+        self._next_farm_idx: int = 0  # which farm to start from next time Start is clicked
         self._expanded_cats: dict = {}
         self._farm_widget_refs: dict = {}
         self._clipboard_farm = None
@@ -1546,6 +1547,14 @@ class BotApp(ctk.CTk):
         if engine:
             engine.stop()
             self._log(f"■ {farm['name']} stopped", "warn")
+        # Advance next-start index past this farm so the next Start begins on the following farm
+        enabled = [f for f in self.farms if f.get("enabled", True)]
+        if enabled:
+            try:
+                stopped_pos = enabled.index(farm)
+                self._next_farm_idx = (stopped_pos + 1) % len(enabled)
+            except ValueError:
+                pass
         # Delay the check slightly so engine state has time to update
         self.after(800, self._check_timer_stop)
 
@@ -1573,9 +1582,14 @@ class BotApp(ctk.CTk):
     def _start_all(self):
         max_concurrent = int(self.bot_settings.get("max_concurrent_sessions", 1))
         sem = threading.Semaphore(max_concurrent)
-        for farm in self.farms:
-            if farm.get("enabled", True):
-                self._start_farm(farm, _semaphore=sem)
+        enabled = [f for f in self.farms if f.get("enabled", True)]
+        if not enabled:
+            return
+        # Rotate enabled list so we start from _next_farm_idx
+        start = self._next_farm_idx % len(enabled)
+        ordered = enabled[start:] + enabled[:start]
+        for farm in ordered:
+            self._start_farm(farm, _semaphore=sem)
 
     def _stop_all(self):
         for farm in self.farms:
