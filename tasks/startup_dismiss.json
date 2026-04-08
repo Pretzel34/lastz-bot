@@ -1,13 +1,25 @@
 {
   "name": "startup_dismiss",
   "actions": [
-    {"action": "wait", "seconds": 2},
+    {"action": "wait", "seconds": 4},
     {
       "action": "if_template_tap",
       "template": "btn_opening_click_away.png",
       "required": false,
       "note": "Dismiss opening advertisement if present"
     },
-    {"action": "wait", "seconds": 1.0}
+    {
+      "action": "if_template_tap",
+      "template": "btn_dismiss_ad_1.png",
+      "required": false,
+      "note": "Dismiss alternate ad popup if present"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_alliance_victory.png",
+      "required": false,
+      "note": "Dismiss alliance victory screen if present"
+    },
+    {"action": "wait", "seconds": 4.0}
   ]
 }

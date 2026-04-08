@@ -253,7 +253,7 @@ class BotApp(ctk.CTk):
             "loop_delay": 60,
             "screenshot_on_error": True,
             "auto_arrange": True,
-            "minimum_cycle_time": 120,
+            "minimum_cycle_time": 60,
         }
 
     def _load_data(self):
