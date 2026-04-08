@@ -190,7 +190,7 @@ def new_farm(index: int, port: int = None, emulator_type: str = "MEmu") -> dict:
 class BotApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("LAST Z BOT")
+        self.title(f"LAST Z BOT v{version.__version__}")
         self.geometry("1300x840")
         self.minsize(1100, 720)
         self.configure(fg_color=C["bg"])
@@ -312,8 +312,12 @@ class BotApp(ctk.CTk):
         logo.pack_propagate(False)
         ctk.CTkLabel(logo, text="⚡", font=("Segoe UI", 22),
                      text_color=C["accent"]).pack(side="left", padx=(16, 4), pady=16)
-        ctk.CTkLabel(logo, text="LAST Z BOT", font=("Segoe UI Black", 13),
-                     text_color=C["text"]).pack(side="left")
+        _logo_text = ctk.CTkFrame(logo, fg_color="transparent")
+        _logo_text.pack(side="left", pady=10)
+        ctk.CTkLabel(_logo_text, text="LAST Z BOT", font=("Segoe UI Black", 13),
+                     text_color=C["text"]).pack(anchor="w")
+        ctk.CTkLabel(_logo_text, text=f"v{version.__version__}", font=("Segoe UI", 9),
+                     text_color=C["text3"]).pack(anchor="w")
 
         ctk.CTkFrame(nav, height=1, fg_color=C["border"]).pack(fill="x", padx=12)
 
@@ -2360,32 +2364,53 @@ class BotApp(ctk.CTk):
                 return
             remote = result["remote_version"]
             asset_url = result["asset_url"]
-
-            self.after(0, lambda: self._log(f"Update {remote} found — downloading in background...", "info"))
-
-            file_name = f"LastZBot-{remote}-Setup.exe" if sys.platform.startswith("win") else f"{GITHUB_REPO}-{remote}.dmg"
-            success = download_and_launch(asset_url, file_name, args=["/S"])
-
-            if not success:
-                self.after(0, lambda: self._log("Update download failed — will retry next launch.", "warn"))
-                return
-
-            # Stop all running engines before the installer replaces the exe
-            def apply_update():
-                self._log(f"Update {remote} downloaded — installing now...", "success")
-                for engine in self.engines.values():
-                    try:
-                        if engine.state == EngineState.RUNNING:
-                            engine.stop()
-                        engine.disconnect()
-                    except Exception:
-                        pass
-                self._save_data()
-                self.destroy()
-
-            self.after(0, apply_update)
+            self.after(0, lambda: self._prompt_update(remote, asset_url))
         except Exception:
             pass
+
+    def _prompt_update(self, remote: str, asset_url: str):
+        self._log(f"Update {remote} is available!", "info")
+        answer = messagebox.askyesno(
+            "Update Available",
+            f"A new version ({remote}) is available.\n\n"
+            f"You are currently running v{version.__version__}.\n\n"
+            "Download and install the update now?",
+            parent=self,
+        )
+        if not answer:
+            self._log("Update skipped — you can update manually from the GitHub releases page.", "warn")
+            return
+        self._log(f"Downloading update {remote}...", "info")
+        threading.Thread(
+            target=self._download_and_apply, args=(remote, asset_url), daemon=True
+        ).start()
+
+    def _download_and_apply(self, remote: str, asset_url: str):
+        file_name = (
+            f"LastZBot-{remote}-Setup.exe"
+            if sys.platform.startswith("win")
+            else f"{GITHUB_REPO}-{remote}.dmg"
+        )
+        success = download_and_launch(asset_url, file_name, args=["/S"])
+
+        if not success:
+            self.after(0, lambda: self._log("Update download failed — will retry next launch.", "warn"))
+            return
+
+        # Stop all running engines before the installer replaces the exe
+        def apply_update():
+            self._log(f"Update {remote} downloaded — installing now...", "success")
+            for engine in self.engines.values():
+                try:
+                    if engine.state == EngineState.RUNNING:
+                        engine.stop()
+                    engine.disconnect()
+                except Exception:
+                    pass
+            self._save_data()
+            self.destroy()
+
+        self.after(0, apply_update)
 
     # ── Close ─────────────────────────────────────────────────────────────
 
