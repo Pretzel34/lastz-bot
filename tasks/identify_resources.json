@@ -4,7 +4,8 @@
     {
       "action": "if_template_tap",
       "template": "btn_warehouse.png",
-      "required": false
+      "required": true,
+      "note": "Open warehouse — required. If not found, recenter and retry. If still missing, skip task."
     },
     {
       "action": "wait",
@@ -25,22 +26,20 @@
       "note": "Screenshot the resource panel, rank by Total RSS ascending, save to logs/resource_priority.json"
     },
     {
-      "action": "tap_template_or_zone",
+      "action": "if_template_tap",
       "template": "btn_close.png",
-      "x_pct": 83.1,
-      "y_pct": 18.6,
-      "required": false
+      "required": false,
+      "note": "Close panel if visible"
     },
     {
       "action": "wait",
       "seconds": 2.0
     },
     {
-      "action": "tap_template_or_zone",
+      "action": "if_template_tap",
       "template": "btn_back_out_of_page.png",
-      "x_pct": 7.4,
-      "y_pct": 94.9,
-      "required": false
+      "required": false,
+      "note": "Back out if visible"
     }
   ]
 }

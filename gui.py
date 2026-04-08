@@ -543,18 +543,27 @@ class BotApp(ctk.CTk):
             except Exception:
                 pass
 
-        # Detect which item the cursor is over
+        # Detect which frame the cursor is closest to by Y midpoint.
+        # This is more reliable than exact bounds inside CTkScrollableFrame
+        # where winfo_rooty() can be unreliable for upper items.
         hovered = None
+        min_dist = float("inf")
         for ckey, frame in self._cat_frames.items():
             if ckey == self._cat_drag_key:
                 continue
             try:
-                if (frame.winfo_rootx() <= mx <= frame.winfo_rootx() + frame.winfo_width()
-                        and frame.winfo_rooty() <= my <= frame.winfo_rooty() + frame.winfo_height()):
-                    hovered = ckey
-                    break
+                fy  = frame.winfo_rooty()
+                fh  = frame.winfo_height()
+                mid = fy + fh // 2
+                dist = abs(my - mid)
+                if dist < min_dist:
+                    min_dist = dist
+                    hovered  = ckey
             except Exception:
                 pass
+        # Only accept hover if cursor is within ~half a frame height of the midpoint
+        if min_dist > 60:
+            hovered = None
 
         # Only act when the hover target actually changes
         if hovered == self._cat_drag_hover_key:
@@ -1730,11 +1739,25 @@ class BotApp(ctk.CTk):
                             identify_data = _json.load(rf)
                         identify_actions = identify_data.get("actions", identify_data) if isinstance(identify_data, dict) else identify_data
                         self.after(0, lambda: self._log("  ▶ Identifying resource priorities...", "info"))
+                        task_aborted = False
                         for act in identify_actions:
                             if engine._stop_event.is_set():
                                 return
-                            executor.execute(act)
-                        self.after(0, lambda: self._log("  ✓ Resource priority identified", "success"))
+                            result = executor.execute(act)
+                            if (result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
+                                    and act.get("required", True)):
+                                # Required action failed — recenter and retry once
+                                self.after(0, lambda: self._log(
+                                    "  ↩ identify_resources: required action failed — recentering and retrying...", "warn"))
+                                executor.execute({"action": "center_hq"})
+                                result = executor.execute(act)
+                                if result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT):
+                                    self.after(0, lambda: self._log(
+                                        "  ✗ identify_resources: failed after retry — skipping task", "warn"))
+                                    task_aborted = True
+                                    break
+                        if not task_aborted:
+                            self.after(0, lambda: self._log("  ✓ Resource priority identified", "success"))
                     except Exception as e:
                         self.after(0, lambda err=e: self._log(f"  ⚠ identify_resources error: {err}", "warn"))
                 else:
