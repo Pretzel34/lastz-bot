@@ -36,109 +36,32 @@
       "seconds": 4.0
     },
     {
-      "action": "if_template_tap",
+      "action": "repeat_if_template",
       "template": "btn_claim_all.png",
-      "required": false,
-      "log_success": "Claim All found \u00e2\u20ac\u201d claiming (round 1)",
-      "log_skip": "No Claim All button \u00e2\u20ac\u201d skipping"
+      "max_taps": 20,
+      "delay": 2.0,
+      "not_found_retries": 1,
+      "log_success": "Claim All loop complete",
+      "on_each": [
+        {
+          "action": "wait",
+          "seconds": 2.0
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_claim_all_recieved.png",
+          "required": false,
+          "note": "Dismiss reward received popup after each claim"
+        },
+        {
+          "action": "wait",
+          "seconds": 1.0
+        }
+      ]
     },
     {
       "action": "wait",
       "seconds": 2.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_claim_all_recieved.png",
-      "required": false,
-      "note": "Dismiss reward received popup \u00e2\u20ac\u201d round 1"
-    },
-    {
-      "action": "wait",
-      "seconds": 3.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_claim_all.png",
-      "required": false,
-      "log_success": "Claim All found \u00e2\u20ac\u201d claiming (round 2)",
-      "log_skip": "No more Claim All after round 1"
-    },
-    {
-      "action": "wait",
-      "seconds": 2.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_claim_all_recieved.png",
-      "required": false,
-      "note": "Dismiss reward received popup \u00e2\u20ac\u201d round 2"
-    },
-    {
-      "action": "wait",
-      "seconds": 3.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_claim_all.png",
-      "required": false,
-      "log_success": "Claim All found \u00e2\u20ac\u201d claiming (round 3)",
-      "log_skip": "No more Claim All after round 2"
-    },
-    {
-      "action": "wait",
-      "seconds": 2.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_claim_all_recieved.png",
-      "required": false,
-      "note": "Dismiss reward received popup \u00e2\u20ac\u201d round 3"
-    },
-    {
-      "action": "wait",
-      "seconds": 3.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_claim_all.png",
-      "required": false,
-      "log_success": "Claim All found \u00e2\u20ac\u201d claiming (round 4)",
-      "log_skip": "No more Claim All after round 3"
-    },
-    {
-      "action": "wait",
-      "seconds": 2.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_claim_all_recieved.png",
-      "required": false,
-      "note": "Dismiss reward received popup \u00e2\u20ac\u201d round 4"
-    },
-    {
-      "action": "wait",
-      "seconds": 3.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_claim_all.png",
-      "required": false,
-      "log_success": "Claim All found \u00e2\u20ac\u201d claiming (round 5)",
-      "log_skip": "No more Claim All after round 4"
-    },
-    {
-      "action": "wait",
-      "seconds": 2.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_claim_all_recieved.png",
-      "required": false,
-      "note": "Dismiss reward received popup \u00e2\u20ac\u201d round 5"
-    },
-    {
-      "action": "wait",
-      "seconds": 3.0
     },
     {
       "action": "tap_template",

@@ -1541,31 +1541,40 @@ class ActionExecutor:
     def _tap_first_found(self, action: dict) -> ActionResult:
         """
         Try each template in 'templates' list in order; tap the first one found.
-        If none are found, logs log_skip and returns SKIPPED (or fails if required=True).
+        If none are found, retries up to not_found_retries times before giving up.
 
         Parameters
         ----------
-        templates  : list of template filenames to try in order (required)
-        threshold  : vision confidence override (optional)
-        required   : if False, returns SKIPPED when none found (default False)
-        log_skip   : message to log when none found
+        templates          : list of template filenames to try in order (required)
+        threshold          : vision confidence override (optional)
+        required           : if False, returns SKIPPED when none found (default False)
+        not_found_retries  : number of additional attempts if nothing is found (default 0)
+        retry_delay        : seconds to wait between retry attempts (default 1.0)
+        log_skip           : message to log when none found after all retries
         """
         templates = action.get("templates", [])
         if not templates:
             return self._fail(action, "tap_first_found requires a non-empty 'templates' list")
 
-        threshold  = float(action.get("threshold")) if action.get("threshold") is not None else None
-        screenshot = self.bot.screenshot()
+        threshold         = float(action.get("threshold")) if action.get("threshold") is not None else None
+        not_found_retries = int(action.get("not_found_retries", 0))
+        retry_delay       = float(action.get("retry_delay", 1.0))
 
-        for tpl in templates:
-            path  = self._template_path(tpl)
-            match = self.vision.find_template(screenshot, path, threshold=threshold)
-            conf  = getattr(match, "confidence", 0) if match else 0
-            self._log(f"  [tap_first_found] '{tpl}' conf={conf:.3f} found={bool(match)}")
-            if match:
-                self._log(f"  [tap_first_found] tapping at ({match.x}, {match.y})")
-                self.bot.tap(match.x, match.y)
-                return self._ok(action, f"Tapped '{tpl}' at ({match.x}, {match.y})")
+        for attempt in range(not_found_retries + 1):
+            screenshot = self.bot.screenshot()
+            for tpl in templates:
+                path  = self._template_path(tpl)
+                match = self.vision.find_template(screenshot, path, threshold=threshold)
+                conf  = getattr(match, "confidence", 0) if match else 0
+                self._log(f"  [tap_first_found] '{tpl}' conf={conf:.3f} found={bool(match)}")
+                if match:
+                    self._log(f"  [tap_first_found] tapping at ({match.x}, {match.y})")
+                    self.bot.tap(match.x, match.y)
+                    return self._ok(action, f"Tapped '{tpl}' at ({match.x}, {match.y})")
+
+            if attempt < not_found_retries:
+                self._log(f"  [tap_first_found] nothing found, retrying ({attempt + 1}/{not_found_retries})...")
+                time.sleep(retry_delay)
 
         skip_msg = action.get("log_skip", f"None of {templates} found — skipping")
         if self.log_callback:

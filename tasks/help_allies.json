@@ -2,6 +2,18 @@
   "name": "help_allies",
   "actions": [
     {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "x_pct": 91.1,
+      "y_pct": 95.6,
+      "note": "Return to HQ map before looking for alliance icon"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
       "action": "if_template_tap",
       "template": "btn_alliance_icon.png",
       "required": true

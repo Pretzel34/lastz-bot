@@ -19,9 +19,12 @@
         "btn_collect_fuel.png",
         "btn_collect_fuel_1.png",
         "btn_collect_fuel_2.png",
-        "btn_collect_fuel_alt.png"
+        "btn_collect_fuel_alt.png",
+        "btn_fuel_alt_1.png"
       ],
       "required": false,
+      "not_found_retries": 2,
+      "retry_delay": 1.5,
       "log_skip": "Fuel not found or collected"
     }
   ]

@@ -26,10 +26,27 @@
       "seconds": 4.0
     },
     {
-      "action": "tap_zone",
-      "x_pct": 50.2,
-      "y_pct": 74.2,
-      "note": "Tap green Collect button"
+      "action": "if_template_tap",
+      "template": "btn_idle_reward_claim.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_green_collect_idle_reward.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all_recieved.png",
+      "required": false
     },
     {
       "action": "wait",
