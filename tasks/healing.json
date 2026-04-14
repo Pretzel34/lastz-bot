@@ -21,10 +21,13 @@
       "seconds": 4.0
     },
     {
-      "action": "if_template_tap",
-      "template": "btn_healed_troops_collect.png",
+      "action": "tap_first_found",
+      "templates": [
+        "btn_healed_troops_collect.png",
+        "btn_collect_healed_2.png",
+        "btn_collect_healed_3.png"
+      ],
       "required": false,
-      "log_success": "Healed troops collected — continuing to heal check",
       "log_skip": "No healed troops to collect"
     },
     {
