@@ -2,8 +2,8 @@ name: Build & Release
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
 
 jobs:
   build:
@@ -13,27 +13,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Bump patch version and set tag
+      - name: Extract version from tag
         id: version
         shell: bash
         run: |
-          LATEST=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
-          if [ -z "$LATEST" ]; then
-            NEW_TAG="v1.0.0"
-          else
-            IFS='.' read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
-            NEW_TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
-          fi
+          NEW_TAG="${GITHUB_REF#refs/tags/}"
           echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
           echo "version=${NEW_TAG#v}" >> $GITHUB_OUTPUT
-
-      - name: Update version.py
-        shell: bash
-        run: |
-          echo "__version__ = \"${{ steps.version.outputs.version }}\"" > version.py
 
       - name: Set up Python
         uses: actions/setup-python@v5
