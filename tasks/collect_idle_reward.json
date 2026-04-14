@@ -37,7 +37,8 @@
     },
     {
       "action": "press_back",
-      "required": false
+      "required": false,
+      "finish_task_on_success": true
     },
     {
       "action": "wait",
@@ -46,6 +47,15 @@
     {
       "action": "if_template_tap",
       "template": "btn_back_out_of_page.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_end_collection.png",
       "required": false
     }
   ]

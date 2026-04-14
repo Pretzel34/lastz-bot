@@ -14,27 +14,15 @@
       "seconds": 3.0
     },
     {
-      "action": "if_template_tap",
-      "template": "btn_collect_fuel_1.png",
-      "required": false
-    },
-    {
-      "action": "wait",
-      "seconds": 4.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_collect_fuel.png",
-      "required": false
-    },
-    {
-      "action": "wait",
-      "seconds": 4.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_collect_fuel_2.png",
-      "required": false
+      "action": "tap_first_found",
+      "templates": [
+        "btn_collect_fuel.png",
+        "btn_collect_fuel_1.png",
+        "btn_collect_fuel_2.png",
+        "btn_collect_fuel_alt.png"
+      ],
+      "required": false,
+      "log_skip": "Fuel not found or collected"
     }
   ]
 }

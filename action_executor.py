@@ -155,6 +155,8 @@ class ActionExecutor:
             result = self._fail(action, f"Exception: {e}")
 
         result.duration_ms = int((time.time() - start) * 1000)
+        if result.status == ActionStatus.SUCCESS and action.get("finish_task_on_success"):
+            result.status = ActionStatus.ABORT_TASK
         status_icon = "✓" if result else "✗"
         self._log(f"  {status_icon} {result.message} ({result.duration_ms}ms)")
         return result
@@ -198,6 +200,7 @@ class ActionExecutor:
             "tap_template_or_zone":     self._tap_template_or_zone,
             "find_template_with_scroll": self._find_template_with_scroll,
             "tap_template_or_template": self._tap_template_or_template,
+            "tap_first_found":          self._tap_first_found,
             "tap_free_formation":       self._tap_free_formation,
             "check_claimed":            self._check_claimed,
             "repeat_if_template":       self._repeat_if_template,
@@ -1533,6 +1536,43 @@ class ActionExecutor:
                 message=skip_msg,
             )
         return self._fail(action, f"Neither '{template}' nor '{fallback_template}' found")
+
+    def _tap_first_found(self, action: dict) -> ActionResult:
+        """
+        Try each template in 'templates' list in order; tap the first one found.
+        If none are found, logs log_skip and returns SKIPPED (or fails if required=True).
+
+        Parameters
+        ----------
+        templates  : list of template filenames to try in order (required)
+        threshold  : vision confidence override (optional)
+        required   : if False, returns SKIPPED when none found (default False)
+        log_skip   : message to log when none found
+        """
+        templates = action.get("templates", [])
+        if not templates:
+            return self._fail(action, "tap_first_found requires a non-empty 'templates' list")
+
+        threshold  = float(action.get("threshold")) if action.get("threshold") is not None else None
+        screenshot = self.bot.screenshot()
+
+        for tpl in templates:
+            path  = self._template_path(tpl)
+            match = self.vision.find_template(screenshot, path, threshold=threshold)
+            conf  = getattr(match, "confidence", 0) if match else 0
+            self._log(f"  [tap_first_found] '{tpl}' conf={conf:.3f} found={bool(match)}")
+            if match:
+                self._log(f"  [tap_first_found] tapping at ({match.x}, {match.y})")
+                self.bot.tap(match.x, match.y)
+                return self._ok(action, f"Tapped '{tpl}' at ({match.x}, {match.y})")
+
+        skip_msg = action.get("log_skip", f"None of {templates} found — skipping")
+        if self.log_callback:
+            self.log_callback(f"  ⏭ {skip_msg}")
+        if not action.get("required", False):
+            return ActionResult(status=ActionStatus.SKIPPED, action=action, message=skip_msg)
+        return self._fail(action, skip_msg)
+
 
     def _tap_free_formation(self, action: dict) -> ActionResult:
         """
