@@ -109,12 +109,22 @@ def download_file(url: str, dest_path: str, timeout: int = 30) -> bool:
 def launch_installer(path: str, args: list = None) -> None:
     """Launch the downloaded installer.
 
-    On Windows, this executes the file directly. On macOS, it uses 'open'.
+    On Windows, writes a small batch file that waits ~3 seconds before
+    running the installer. This gives the calling process time to fully
+    exit and release any locked files (e.g. the exe being replaced)
+    before the installer writes to disk.
+
     Pass args=["/S"] for a silent NSIS install (used by auto-update).
     """
     extra = args or []
     if sys.platform.startswith("win"):
-        subprocess.Popen([path] + extra)
+        # ping localhost 4 times ≈ 3-second delay on Windows
+        args_str = " ".join(extra)
+        batch = f'@echo off\nping -n 4 127.0.0.1 > nul\n"{path}" {args_str}\n'
+        batch_path = os.path.join(tempfile.gettempdir(), "lastz_update.bat")
+        with open(batch_path, "w") as f:
+            f.write(batch)
+        subprocess.Popen(["cmd.exe", "/c", batch_path])
     elif sys.platform == "darwin":
         subprocess.Popen(["open", path])
     else:
