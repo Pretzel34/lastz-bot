@@ -114,7 +114,7 @@ def launch_installer(path: str, args: list = None) -> None:
     """
     extra = args or []
     if sys.platform.startswith("win"):
-        subprocess.Popen([path] + extra, shell=True)
+        subprocess.Popen([path] + extra)
     elif sys.platform == "darwin":
         subprocess.Popen(["open", path])
     else:
