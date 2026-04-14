@@ -1810,9 +1810,28 @@ class BotApp(ctk.CTk):
                 self.after(0, lambda: self._log(
                     f"✓ {name} running — {len(tasks)} task(s) loaded", "success"))
 
-                # Wait for the engine to finish before releasing the concurrency slot
+                # Wait for the engine to finish — enforce max_farm_timeout
+                max_timeout_sec = float(self.bot_settings.get("max_farm_timeout", 40)) * 60
+                force_kill      = self.bot_settings.get("force_kill_hung", True)
                 if engine._thread:
-                    engine._thread.join()
+                    engine._thread.join(timeout=max_timeout_sec)
+                    if engine._thread.is_alive():
+                        self.after(0, lambda: self._log(
+                            f"  ⚠ {name}: farm exceeded {self.bot_settings.get('max_farm_timeout', 40)} min timeout — {'force killing' if force_kill else 'signaling stop'}",
+                            "warn"))
+                        engine.stop()
+                        if force_kill:
+                            try:
+                                launcher.stop_instance(idx)
+                                self.after(0, lambda: self._log(
+                                    f"  ✓ {name}: hung emulator killed", "warn"))
+                            except Exception as ke:
+                                self.after(0, lambda err=ke: self._log(
+                                    f"  ✗ {name}: failed to kill emulator: {err}", "error"))
+                        engine._thread.join(timeout=30)
+                        if engine._thread.is_alive():
+                            self.after(0, lambda: self._log(
+                                f"  ✗ {name}: engine thread still alive after kill — abandoning", "error"))
 
                 # Record cycle completion time (used for "Next Cycle" countdown)
                 self.after(0, self._on_farm_cycle_complete)

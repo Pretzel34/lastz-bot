@@ -418,6 +418,7 @@ class BotEngine:
         self._log(f"Bot stopped. {self.stats.summary()}")
         self._save_session_log()
         self._set_state(EngineState.STOPPED)
+        self._close_logging()
 
     def _run_all_tasks(self) -> bool:
         all_ok = True
@@ -593,24 +594,41 @@ class BotEngine:
             log_dir = self.config["bot"]["log_dir"]
         Path(log_dir).mkdir(parents=True, exist_ok=True)
         log_file = f"{log_dir}/bot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(message)s",
-            handlers=[
-                logging.FileHandler(log_file, encoding="utf-8"),
-                logging.StreamHandler(),
-            ]
-        )
-        # Fix Windows console Unicode issues — replace chars that cp1252 can't encode
-        # Guard against pythonw where stdout/stderr are None
-        for h in logging.root.handlers:
-            if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
-                try:
-                    if h.stream is not None and h.stream.fileno() >= 0:
-                        h.stream = open(h.stream.fileno(), mode='w', encoding='utf-8', closefd=False, buffering=1)
-                except Exception:
-                    pass
-        self.logger = logging.getLogger("BotEngine")
+
+        # Use a unique named logger per instance so that multiple BotEngine objects
+        # in the same process each write to their own log file. logging.basicConfig()
+        # only configures the root logger once and is a no-op on subsequent calls,
+        # which caused every farm after the first to produce an empty log file.
+        logger_name = f"BotEngine_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{id(self)}"
+        self.logger = logging.getLogger(logger_name)
+        self.logger.setLevel(logging.INFO)
+        self.logger.propagate = False  # don't bubble up to root logger
+
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setFormatter(logging.Formatter("%(message)s"))
+        self.logger.addHandler(fh)
+
+        # Console handler — only in development (not in frozen exe)
+        if not getattr(sys, "frozen", False):
+            sh = logging.StreamHandler()
+            sh.setFormatter(logging.Formatter("%(message)s"))
+            try:
+                if sh.stream is not None and sh.stream.fileno() >= 0:
+                    sh.stream = open(sh.stream.fileno(), mode='w',
+                                     encoding='utf-8', closefd=False, buffering=1)
+            except Exception:
+                pass
+            self.logger.addHandler(sh)
+
+    def _close_logging(self):
+        """Flush and close all handlers on this instance's logger."""
+        for h in list(self.logger.handlers):
+            try:
+                h.flush()
+                h.close()
+            except Exception:
+                pass
+            self.logger.removeHandler(h)
 
     def _save_session_log(self):
         if getattr(sys, "frozen", False):
