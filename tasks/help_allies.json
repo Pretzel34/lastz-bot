@@ -1,0 +1,46 @@
+{
+  "name": "help_allies",
+  "actions": [
+    {
+      "action": "if_template_tap",
+      "template": "btn_alliance_icon.png",
+      "required": true
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_help_alliance.png",
+      "required": true
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_help_all.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_back_out_of_page.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_back_out_of_page.png",
+      "required": false
+    }
+  ]
+}

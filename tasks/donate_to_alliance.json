@@ -1,0 +1,81 @@
+{
+  "name": "donate_to_alliance",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_to_world_view.png",
+      "world_btn": "btn_go_to_hq_view.png",
+      "note": "Ensure HQ view before task"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_alliance_icon.png",
+      "required": true
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_alliance_tech.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_ocr_pattern",
+      "template": "btn_preferred_donation.png",
+      "ocr_pattern": "\\d+/\\d+",
+      "required": false,
+      "log_skip": "No donatable items found — skipping donation"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "repeat_if_template",
+      "template": "btn_donate_zent.png",
+      "max_taps": 20,
+      "delay": 1.5,
+      "not_found_retries": 3,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_leave_donation.png",
+      "x_pct": 5.6,
+      "y_pct": 72.7,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_back_out_of_page.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_back_out_of_page.png",
+      "required": false
+    }
+  ]
+}

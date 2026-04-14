@@ -63,6 +63,15 @@
     },
     {
       "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_end_collection.png",
+      "required": false
+    },
+    {
+      "action": "wait",
       "seconds": 6.0
     },
     {

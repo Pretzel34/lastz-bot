@@ -116,6 +116,13 @@ GATHER_TASKS = [
     ("collect_zents",       "Collect Zents",       "gather_zent",  False),
 ]
 
+# Alliance task JSON files — (setting_key, label, json_filename)
+ALLIANCE_TASKS = [
+    ("donate_to_alliance",  "Donate In Alliance Tech", "donate_to_alliance"),
+    ("help_allies",         "Help Allies",             "help_allies"),
+    ("collect_alliance_gift", "Collect Alliance Gift", "collect_alliance_gift"),
+]
+
 TASK_CATEGORIES = [
     {
         "key":   "daily_tasks",
@@ -153,6 +160,17 @@ TASK_CATEGORIES = [
             {"key": "collect_zents",       "label": "Collect Zents",         "type": "toggle",  "default": False},
             {"key": "resource_site_level", "label": "Resource Site Level",   "type": "spinner", "default": 6, "min": 1, "max": 10},
             {"key": "max_formations",      "label": "Max Formations To Use", "type": "spinner", "default": 3, "min": 1, "max": 4},
+        ]
+    },
+    {
+        "key":   "alliance",
+        "label": "Alliance",
+        "icon":  "🤝",
+        "settings": [
+            {"key": "enabled",                "label": "Enable Alliance Tab",     "type": "toggle", "default": True},
+            {"key": "donate_to_alliance",     "label": "Donate In Alliance Tech", "type": "toggle", "default": True},
+            {"key": "help_allies",            "label": "Help Allies",             "type": "toggle", "default": True},
+            {"key": "collect_alliance_gift",  "label": "Collect Alliance Gift",   "type": "toggle", "default": True},
         ]
     },
 ]
@@ -1997,6 +2015,28 @@ class BotApp(ctk.CTk):
                 self._log(f"  ✓ Queued {max_formations} gather run(s)", "info")
         else:
             self._log("  Gathering disabled — skipping all gathering tasks", "warn")
+
+        # ── Alliance tasks ────────────────────────────────────────────
+        alliance_cfg = farm_tasks.get("alliance", {})
+        if alliance_cfg.get("enabled", True):
+            for key, label, json_key in ALLIANCE_TASKS:
+                if not alliance_cfg.get(key, True):
+                    self._log(f"  ⏭ Skipping {label} (disabled)", "info")
+                    continue
+                json_file = tasks_dir / f"{json_key}.json"
+                if json_file.exists():
+                    try:
+                        with open(json_file) as f:
+                            data = _json.load(f)
+                        actions = data.get("actions", data) if isinstance(data, dict) else data
+                        tasks.append({"name": label, "actions": actions})
+                        self._log(f"  ✓ {label} — {len(actions)} actions", "info")
+                    except Exception as e:
+                        self._log(f"  ✗ Failed to load {json_file.name}: {e}", "error")
+                else:
+                    self._log(f"  ⚠ {label} — tasks/{json_key}.json not found, skipping", "warn")
+        else:
+            self._log("  Alliance disabled — skipping all alliance tasks", "warn")
 
         return tasks
 

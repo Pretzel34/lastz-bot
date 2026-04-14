@@ -201,6 +201,7 @@ class ActionExecutor:
             "find_template_with_scroll": self._find_template_with_scroll,
             "tap_template_or_template": self._tap_template_or_template,
             "tap_first_found":          self._tap_first_found,
+            "tap_template_or_ocr_pattern": self._tap_template_or_ocr_pattern,
             "tap_free_formation":       self._tap_free_formation,
             "check_claimed":            self._check_claimed,
             "repeat_if_template":       self._repeat_if_template,
@@ -1682,10 +1683,12 @@ class ActionExecutor:
         if not template:
             return self._fail(action, "repeat_if_template requires 'template'")
         path = self._template_path(template)
-        max_taps = int(action.get("max_taps", 20))
-        delay = float(action.get("delay", 0.5))
-        threshold = float(action.get("threshold")) if action.get("threshold") is not None else None
-        taps = 0
+        max_taps        = int(action.get("max_taps", 20))
+        delay           = float(action.get("delay", 0.5))
+        not_found_retries = int(action.get("not_found_retries", 2))
+        threshold       = float(action.get("threshold")) if action.get("threshold") is not None else None
+        taps            = 0
+        misses          = 0
 
         on_each = action.get("on_each", [])
 
@@ -1696,8 +1699,14 @@ class ActionExecutor:
             screenshot = self.bot.screenshot()
             match = self.vision.find_template(screenshot, path, threshold=threshold)
             if not match:
-                self._log(f"  repeat_if_template: '{template}' no longer found after {taps} tap(s)")
-                break
+                misses += 1
+                if misses > not_found_retries:
+                    self._log(f"  repeat_if_template: '{template}' not found after {not_found_retries} retries — done ({taps} tap(s))")
+                    break
+                self._log(f"  repeat_if_template: '{template}' not found, retrying ({misses}/{not_found_retries})...")
+                time.sleep(delay)
+                continue
+            misses = 0
             self.bot.tap(match.x, match.y)
             taps += 1
             self._log(f"  repeat_if_template: tap {taps} on '{template}'")
@@ -1712,6 +1721,58 @@ class ActionExecutor:
                     return sub_result
 
         return self._ok(action, f"Repeated tap '{template}' x{taps}")
+
+    def _tap_template_or_ocr_pattern(self, action: dict) -> ActionResult:
+        """
+        Try a template first. If not found, scan the screen with OCR and tap the
+        first text that matches ocr_pattern (a Python regex). Useful when a
+        preferred target may be unavailable but any matching text will do —
+        e.g. finding a donatable alliance tech item showing "6/10" or "1/10".
+
+        Parameters
+        ----------
+        template    : template filename to try first (required)
+        ocr_pattern : Python regex string to match against OCR text (required)
+        required    : if False, returns SKIPPED when neither found (default False)
+        log_skip    : message logged when nothing is found
+        threshold   : vision confidence override (optional)
+        """
+        import re as _re
+
+        template    = action.get("template")
+        ocr_pattern = action.get("ocr_pattern")
+        if not template or not ocr_pattern:
+            return self._fail(action, "tap_template_or_ocr_pattern requires 'template' and 'ocr_pattern'")
+
+        threshold  = float(action.get("threshold")) if action.get("threshold") is not None else None
+        screenshot = self.bot.screenshot()
+
+        # ── Try template first ───────────────────────────────────────────
+        path  = self._template_path(template)
+        match = self.vision.find_template(screenshot, path, threshold=threshold)
+        conf  = getattr(match, "confidence", 0) if match else 0
+        self._log(f"  [tap_template_or_ocr_pattern] '{template}' conf={conf:.3f} found={bool(match)}")
+        if match:
+            self.bot.tap(match.x, match.y)
+            return self._ok(action, f"Tapped preferred template '{template}' at ({match.x}, {match.y})")
+
+        # ── Fallback: OCR scan for pattern ───────────────────────────────
+        self._log(f"  [tap_template_or_ocr_pattern] template not found — scanning OCR for pattern '{ocr_pattern}'")
+        ocr_results = self.vision.read_text(screenshot, min_confidence=0.3)
+        pattern = _re.compile(ocr_pattern)
+        for r in ocr_results:
+            if pattern.search(r.text):
+                self._log(f"  [tap_template_or_ocr_pattern] OCR match: '{r.text}' at ({r.x}, {r.y})")
+                self.bot.tap(r.x, r.y)
+                return self._ok(action, f"Tapped OCR match '{r.text}' at ({r.x}, {r.y})")
+
+        # ── Nothing found ────────────────────────────────────────────────
+        skip_msg = action.get("log_skip", f"Neither '{template}' nor any OCR match for '{ocr_pattern}' found")
+        if self.log_callback:
+            self.log_callback(f"  ⏭ {skip_msg}")
+        if not action.get("required", False):
+            return ActionResult(status=ActionStatus.SKIPPED, action=action, message=skip_msg)
+        return self._fail(action, skip_msg)
 
     def _verify_setting_template(self, action: dict) -> ActionResult:
         """
