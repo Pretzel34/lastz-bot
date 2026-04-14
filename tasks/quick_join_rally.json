@@ -93,20 +93,12 @@
       "seconds": 6.0
     },
     {
-      "action": "if_template_tap",
+      "action": "tap_template_or_zone",
       "template": "btn_close_auto_team_up_boomer.png",
-      "required": false,
-      "note": "Close auto team-up dialog if present"
-    },
-    {
-      "action": "wait",
-      "seconds": 3.0
-    },
-    {
-      "action": "tap_zone",
       "x_pct": 50.0,
       "y_pct": 50.0,
-      "note": "Fallback dismiss tap if close button was not found"
+      "required": false,
+      "note": "Close auto team-up dialog — fallback tap center if button not found"
     },
     {
       "action": "wait",

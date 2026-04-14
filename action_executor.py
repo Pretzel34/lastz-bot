@@ -1905,6 +1905,8 @@ class ActionExecutor:
 
         # ── Adjust loop ───────────────────────────────────────────────
         recent_levels: list[int] = []  # rolling window for oscillation detection
+        consecutive_misses = 0
+        abort_after_misses = int(action.get("abort_after_misses", 3))
 
         for attempt in range(1, max_attempts + 1):
             if self._stop_event and self._stop_event.is_set():
@@ -1913,10 +1915,16 @@ class ActionExecutor:
             current = detect_current_level(screenshot)
 
             if current is None:
-                self._log(f"  [adjust_boomer_level] attempt {attempt}: no level template matched — retrying")
+                consecutive_misses += 1
+                self._log(f"  [adjust_boomer_level] attempt {attempt}: no level template matched ({consecutive_misses}/{abort_after_misses})")
+                if consecutive_misses >= abort_after_misses:
+                    msg = f"adjust_boomer_level: no level template matched {abort_after_misses} times in a row — wrong screen, aborting task"
+                    self._log(f"  ⏭ {msg}")
+                    return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
                 if self._interruptible_sleep(tap_delay):
                     return self._ok(action, "adjust_boomer_level: stop requested")
                 continue
+            consecutive_misses = 0
 
             self._log(f"  [adjust_boomer_level] attempt {attempt}: current={current} target={target}")
 
