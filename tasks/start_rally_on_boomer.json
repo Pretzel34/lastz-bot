@@ -31,7 +31,7 @@
       "template": "btn_boomer.png",
       "fallback_template": "btn_frostbane_boomer.png",
       "required": false,
-      "note": "Select Boomer category \u00e2\u20ac\u201d tries btn_boomer.png first, falls back to btn_frostbane_boomer.png"
+      "note": "Select Boomer category — tries btn_boomer.png first, falls back to btn_frostbane_boomer.png"
     },
     {
       "action": "wait",
@@ -44,8 +44,8 @@
       "plus_template": "btn_plus_boomer.png",
       "minus_template": "btn_subtract_boomer_lvl.png",
       "min_level": 1,
-      "max_level": 8,
-      "max_attempts": 20,
+      "max_level": 47,
+      "max_attempts": 50,
       "tap_delay": 3.0,
       "required": false,
       "note": "Detect current boomer level and tap +/- until it matches rally.boomer_level setting"

@@ -105,7 +105,7 @@ DAILY_TASKS = [
 # setting_key must match the key in the "rally" settings block above
 RALLY_TASKS = [
     ("quick_join_rally", "Quick Join Rally", "quick_join_rally"),
-    ("create_rally",     "Create Rally",     "start_rally_on_boomer_alt"),
+    ("create_rally",     "Create Rally",     "start_rally_on_boomer"),
 ]
 
 # Gathering task JSON files — (setting_key, label, json_filename, default_enabled)
@@ -209,6 +209,7 @@ class BotApp(ctk.CTk):
         self._clipboard_farm = None
         self._record_runs = False
         self._arrange_lock = threading.Lock()
+        self._halted = threading.Event()  # set by Stop All; prevents queued farm threads from starting
 
         # Timer state
         self._bot_start_time = None
@@ -1633,6 +1634,11 @@ class BotApp(ctk.CTk):
             if _semaphore:
                 _semaphore.acquire()
             try:
+                # If Stop All was clicked while this farm was queued, bail out immediately
+                if self._halted.is_set():
+                    self.after(0, lambda: self._log(f"■ {name}: skipped — bot halted", "warn"))
+                    return
+
                 def launch_log(msg, level="info"):
                     self.after(0, lambda m=msg, l=level: self._log(m, l))
 
@@ -1850,6 +1856,7 @@ class BotApp(ctk.CTk):
         self._log(f"Run recording {'ON' if self._record_runs else 'OFF'}.", "info")
 
     def _start_all(self):
+        self._halted.clear()  # allow farm threads to run
         max_concurrent = int(self.bot_settings.get("max_concurrent_sessions", 1))
         sem = threading.Semaphore(max_concurrent)
         enabled = [f for f in self.farms if f.get("enabled", True)]
@@ -1862,6 +1869,7 @@ class BotApp(ctk.CTk):
             self._start_farm(farm, _semaphore=sem)
 
     def _stop_all(self):
+        self._halted.set()  # signal all queued farm threads to abort when they acquire the semaphore
         for farm in self.farms:
             self._stop_farm(farm)
         self._stop_timer()

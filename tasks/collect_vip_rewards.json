@@ -26,13 +26,22 @@
       "action": "if_template_tap",
       "template": "btn_claim_vip_chest.png",
       "required": false,
-      "log_success": "VIP chest available — claiming",
-      "log_skip": "VIP chest not found — checking if already claimed"
+      "log_success": "VIP chest available \u00e2\u20ac\u201d claiming",
+      "log_skip": "VIP chest not found \u00e2\u20ac\u201d checking if already claimed"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_leave_vip_claimed.png",
+      "required": false
     },
     {
       "action": "check_claimed",
       "claimed_template": "btn_vip_treasure_claimed.png",
-      "claimed_message": "VIP treasure already claimed — continuing",
+      "claimed_message": "VIP treasure already claimed \u00e2\u20ac\u201d continuing",
       "note": "Check if chest was already claimed today"
     },
     {
@@ -43,13 +52,13 @@
       "action": "if_template_tap",
       "template": "btn_claim_vip_freebie.png",
       "required": false,
-      "log_success": "VIP freebie available — claiming",
-      "log_skip": "VIP freebie not found — checking if already claimed"
+      "log_success": "VIP freebie available \u00e2\u20ac\u201d claiming",
+      "log_skip": "VIP freebie not found \u00e2\u20ac\u201d checking if already claimed"
     },
     {
       "action": "check_claimed",
       "claimed_template": "btn_freebie_vip_claimed.png",
-      "claimed_message": "VIP freebie already claimed — continuing",
+      "claimed_message": "VIP freebie already claimed \u00e2\u20ac\u201d continuing",
       "note": "Check if freebie was already claimed today"
     },
     {

@@ -104,6 +104,7 @@ class CaptureTool(ctk.CTk):
         self.recorded_actions: list[dict] = []
         self._drag_source: int = None   # index being dragged
         self._drag_target: int = None
+        self._seq_rows:    list = []    # row widget refs for hit-testing during drag
 
         # Recording
         self._recording = False
@@ -1245,6 +1246,7 @@ class CaptureTool(ctk.CTk):
     def _refresh_sequence(self):
         for w in self.seq_scroll.winfo_children():
             w.destroy()
+        self._seq_rows = []
 
         if not self.recorded_actions:
             ctk.CTkLabel(self.seq_scroll,
@@ -1261,6 +1263,7 @@ class CaptureTool(ctk.CTk):
                             border_color=C["border"])
         row.pack(fill="x", pady=2)
         row._idx = idx
+        self._seq_rows.append(row)
 
         # Drag handle
         handle = ctk.CTkLabel(row, text="⠿", font=("Segoe UI", 14),
@@ -1436,13 +1439,45 @@ class CaptureTool(ctk.CTk):
 
     def _drag_start(self, idx: int):
         self._drag_source = idx
+        self._drag_target = idx
+        # Highlight the row being picked up
+        if 0 <= idx < len(self._seq_rows):
+            self._seq_rows[idx].configure(border_color=C["accent"])
 
     def _drag_motion(self, event, idx: int):
-        # Highlight target position based on mouse Y in scroll frame
-        pass  # Visual feedback handled by up/down buttons for simplicity
+        if self._drag_source is None:
+            return
+        # Use absolute screen Y to find which row the cursor is over
+        mouse_y = event.y_root
+        new_target = self._drag_source
+        for i, row in enumerate(self._seq_rows):
+            try:
+                row_y = row.winfo_rooty()
+                row_h = row.winfo_height()
+                if row_y <= mouse_y < row_y + row_h:
+                    new_target = i
+                    break
+            except Exception:
+                pass
+        if new_target != self._drag_target:
+            # Clear highlight on old target (unless it's the source)
+            if self._drag_target is not None and self._drag_target != self._drag_source:
+                if 0 <= self._drag_target < len(self._seq_rows):
+                    self._seq_rows[self._drag_target].configure(border_color=C["border"])
+            self._drag_target = new_target
+            # Highlight new target in a different colour to show drop position
+            if new_target != self._drag_source and 0 <= new_target < len(self._seq_rows):
+                self._seq_rows[new_target].configure(border_color="#ff9900")
 
     def _drag_end(self, idx: int):
+        src = self._drag_source
+        tgt = self._drag_target
         self._drag_source = None
+        self._drag_target = None
+        if src is not None and tgt is not None and src != tgt:
+            item = self.recorded_actions.pop(src)
+            self.recorded_actions.insert(tgt, item)
+        self._refresh_sequence()
 
     # ══════════════════════════════════════════════════════════════════════
     # Save / Load

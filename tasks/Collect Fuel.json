@@ -26,6 +26,15 @@
       "action": "if_template_tap",
       "template": "btn_collect_fuel.png",
       "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_collect_fuel_2.png",
+      "required": false
     }
   ]
 }

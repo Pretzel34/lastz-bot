@@ -14,16 +14,16 @@
       "seconds": 3.0
     },
     {
-      "action": "if_template_tap",
+      "action": "tap_template_or_template",
       "template": "btn_Idle_reward.png",
+      "fallback_template": "btn_idle_reward_alt.png",
       "required": false,
       "skip_task_if_not_found": true,
-      "log_success": "Idle Reward chest found \u00e2\u20ac\u201d opening dialog",
-      "log_skip": "Idle Reward not available \u00e2\u20ac\u201d skipping"
+      "log_skip": "Idle Reward not available \u00e2\u20ac\u201d skipping task"
     },
     {
       "action": "wait",
-      "seconds": 2.0
+      "seconds": 4.0
     },
     {
       "action": "tap_zone",
@@ -33,10 +33,19 @@
     },
     {
       "action": "wait",
-      "seconds": 1.0
+      "seconds": 4.0
     },
     {
       "action": "press_back",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_back_out_of_page.png",
       "required": false
     }
   ]

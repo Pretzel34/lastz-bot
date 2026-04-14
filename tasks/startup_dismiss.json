@@ -20,6 +20,12 @@
       "required": false,
       "note": "Dismiss alliance victory screen if present"
     },
+    {
+      "action": "if_template_tap",
+      "template": "btn_additional_click_away.png",
+      "required": false,
+      "note": "Dismiss additional popup if present"
+    },
     {"action": "wait", "seconds": 4.0}
   ]
 }

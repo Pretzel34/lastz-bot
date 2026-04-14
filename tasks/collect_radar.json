@@ -15,15 +15,6 @@
     },
     {
       "action": "if_template_tap",
-      "template": "btn_radar_collect_present.png",
-      "required": false
-    },
-    {
-      "action": "wait",
-      "seconds": 6.0
-    },
-    {
-      "action": "if_template_tap",
       "template": "btn_radar_to_collect.png",
       "required": false
     },
@@ -32,26 +23,112 @@
       "seconds": 6.0
     },
     {
-      "action": "if_template_tap",
-      "template": "btn_claim_all.png",
+      "action": "tap_template_or_template",
+      "template": "btn_laura_radar.png",
+      "fallback_template": "btn_laura_alt.png",
       "required": false,
-      "log_success": "Radar rewards found \u00e2\u20ac\u201d claiming all",
-      "log_skip": "No radar rewards to claim \u00e2\u20ac\u201d continuing"
+      "note": "Tap laura radar — tries primary first, falls back to alternate if not found, skips if neither present"
     },
     {
       "action": "wait",
-      "seconds": 6.0
+      "seconds": 3.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_radar_collect_present.png",
+      "required": false,
+      "log_success": "Radar reward found — collecting",
+      "log_skip": "No radar collect button present — skipping"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
     },
     {
       "action": "if_template_tap",
       "template": "btn_clear.png",
       "required": false,
-      "note": "Clear any popup"
+      "note": "Dismiss reward popup after collect tap"
     },
     {
       "action": "wait",
-      "seconds": 6.0
+      "seconds": 3.0
     },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all.png",
+      "required": false,
+      "log_success": "Claim All found — claiming (round 1)",
+      "log_skip": "No Claim All button — skipping"
+    },
+    { "action": "wait", "seconds": 2.0 },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all_recieved.png",
+      "required": false,
+      "note": "Dismiss reward received popup — round 1"
+    },
+    { "action": "wait", "seconds": 3.0 },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all.png",
+      "required": false,
+      "log_success": "Claim All found — claiming (round 2)",
+      "log_skip": "No more Claim All after round 1"
+    },
+    { "action": "wait", "seconds": 2.0 },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all_recieved.png",
+      "required": false,
+      "note": "Dismiss reward received popup — round 2"
+    },
+    { "action": "wait", "seconds": 3.0 },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all.png",
+      "required": false,
+      "log_success": "Claim All found — claiming (round 3)",
+      "log_skip": "No more Claim All after round 2"
+    },
+    { "action": "wait", "seconds": 2.0 },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all_recieved.png",
+      "required": false,
+      "note": "Dismiss reward received popup — round 3"
+    },
+    { "action": "wait", "seconds": 3.0 },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all.png",
+      "required": false,
+      "log_success": "Claim All found — claiming (round 4)",
+      "log_skip": "No more Claim All after round 3"
+    },
+    { "action": "wait", "seconds": 2.0 },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all_recieved.png",
+      "required": false,
+      "note": "Dismiss reward received popup — round 4"
+    },
+    { "action": "wait", "seconds": 3.0 },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all.png",
+      "required": false,
+      "log_success": "Claim All found — claiming (round 5)",
+      "log_skip": "No more Claim All after round 4"
+    },
+    { "action": "wait", "seconds": 2.0 },
+    {
+      "action": "if_template_tap",
+      "template": "btn_claim_all_recieved.png",
+      "required": false,
+      "note": "Dismiss reward received popup — round 5"
+    },
+    { "action": "wait", "seconds": 3.0 },
     {
       "action": "tap_template",
       "template": "btn_back.png",

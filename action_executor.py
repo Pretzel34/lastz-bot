@@ -1501,8 +1501,9 @@ class ActionExecutor:
         conf   = getattr(tmatch, "confidence", 0) if tmatch else 0
         self._log(f"  [tap_template_or_template] '{template}' conf={conf:.3f} found={bool(tmatch)}")
         if tmatch:
+            self._log(f"  [tap_template_or_template] tapping at ({tmatch.x}, {tmatch.y})")
             self.bot.tap(tmatch.x, tmatch.y)
-            return self._ok(action, f"Tapped primary template '{template}'")
+            return self._ok(action, f"Tapped primary template '{template}' at ({tmatch.x}, {tmatch.y})")
 
         # ── Try fallback ─────────────────────────────────────────────────
         fb_path  = self._template_path(fallback_template)
@@ -1510,16 +1511,26 @@ class ActionExecutor:
         fb_conf  = getattr(fb_match, "confidence", 0) if fb_match else 0
         self._log(f"  [tap_template_or_template] fallback '{fallback_template}' conf={fb_conf:.3f} found={bool(fb_match)}")
         if fb_match:
+            self._log(f"  [tap_template_or_template] tapping fallback at ({fb_match.x}, {fb_match.y})")
             self.bot.tap(fb_match.x, fb_match.y)
             return self._ok(action,
-                f"Primary '{template}' not found — tapped fallback '{fallback_template}'")
+                f"Primary '{template}' not found — tapped fallback '{fallback_template}' at ({fb_match.x}, {fb_match.y})")
 
         # ── Neither found ────────────────────────────────────────────────
+        skip_msg = action.get("log_skip", f"Neither '{template}' nor '{fallback_template}' found — skipping")
+        if self.log_callback:
+            self.log_callback(f"  ⏭ {skip_msg}")
+        if action.get("skip_task_if_not_found", False):
+            return ActionResult(
+                status=ActionStatus.ABORT_TASK,
+                action=action,
+                message=skip_msg,
+            )
         if not action.get("required", True):
             return ActionResult(
                 status=ActionStatus.SKIPPED,
                 action=action,
-                message=f"Neither '{template}' nor '{fallback_template}' found — skipping",
+                message=skip_msg,
             )
         return self._fail(action, f"Neither '{template}' nor '{fallback_template}' found")
 
@@ -1792,6 +1803,8 @@ class ActionExecutor:
             return False
 
         # ── Adjust loop ───────────────────────────────────────────────
+        recent_levels: list[int] = []  # rolling window for oscillation detection
+
         for attempt in range(1, max_attempts + 1):
             if self._stop_event and self._stop_event.is_set():
                 return self._ok(action, "adjust_boomer_level: stop requested")
@@ -1808,6 +1821,23 @@ class ActionExecutor:
 
             if current == target:
                 return self._ok(action, f"Boomer level set to {target}")
+
+            # ── Oscillation detection ─────────────────────────────────
+            # If we keep bouncing between two values that straddle the target,
+            # the template for the target level is being misread. Accept it.
+            recent_levels.append(current)
+            if len(recent_levels) > 4:
+                recent_levels.pop(0)
+            if len(recent_levels) >= 4:
+                unique = set(recent_levels)
+                if len(unique) == 2:
+                    lo, hi = min(unique), max(unique)
+                    if lo < target < hi:
+                        self._log(
+                            f"  [adjust_boomer_level] oscillation detected between {lo} and {hi} "
+                            f"— target {target} is between them, likely a template misread. Accepting."
+                        )
+                        return self._ok(action, f"Boomer level set to {target} (oscillation resolved)")
 
             if current < target:
                 self._log(f"  [adjust_boomer_level] tapping + ({plus_tpl})")
