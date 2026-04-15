@@ -104,8 +104,10 @@
       "seconds": 3.0
     },
     {
-      "action": "if_template_tap",
-      "template": "btn_back.png",
+      "action": "tap_template_or_zone",
+      "template": "btn_back_out_of_page.png",
+      "x_pct": 6.3,
+      "y_pct": 94.9,
       "required": false
     }
   ]
