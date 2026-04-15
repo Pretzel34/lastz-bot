@@ -1633,10 +1633,14 @@ class BotApp(ctk.CTk):
             messagebox.showerror("Error", f"Bot modules missing:\n{IMPORT_ERROR}")
             return
 
-        # Auto-save current UI widget values so spinner/toggle changes apply without a manual Save
+        # Auto-save current UI widget values so spinner/toggle changes apply without a manual Save.
+        # Only save if _farm_widget_refs belongs to this farm — if the user was viewing a different
+        # farm in the detail panel, _farm_widget_refs holds that other farm's widgets and writing
+        # them here would overwrite this farm's settings with the wrong values.
         try:
             farm_idx = self.farms.index(farm)
-            if getattr(self, "_farm_widget_refs", None):
+            if (getattr(self, "_farm_widget_refs", None)
+                    and getattr(self, "_active_farm_idx", None) == farm_idx):
                 self._save_farm(farm_idx)
         except (ValueError, Exception):
             pass
