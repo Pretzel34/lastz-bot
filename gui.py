@@ -228,6 +228,7 @@ class BotApp(ctk.CTk):
         self._record_runs = False
         self._arrange_lock = threading.Lock()
         self._halted = threading.Event()  # set by Stop All; prevents queued farm threads from starting
+        self._farm_semaphore: threading.Semaphore | None = None  # shared across all _start_all calls
 
         # Timer state
         self._bot_start_time = None
@@ -1895,7 +1896,10 @@ class BotApp(ctk.CTk):
     def _start_all(self):
         self._halted.clear()  # allow farm threads to run
         max_concurrent = int(self.bot_settings.get("max_concurrent_sessions", 1))
-        sem = threading.Semaphore(max_concurrent)
+        # Reuse existing semaphore if still active; create a new one only when starting fresh
+        if self._farm_semaphore is None:
+            self._farm_semaphore = threading.Semaphore(max_concurrent)
+        sem = self._farm_semaphore
         enabled = [f for f in self.farms if f.get("enabled", True)]
         if not enabled:
             return
@@ -1907,6 +1911,7 @@ class BotApp(ctk.CTk):
 
     def _stop_all(self):
         self._halted.set()  # signal all queued farm threads to abort when they acquire the semaphore
+        self._farm_semaphore = None  # reset so the next Start gets a fresh semaphore
         for farm in self.farms:
             self._stop_farm(farm)
         self._stop_timer()
@@ -2111,6 +2116,7 @@ class BotApp(ctk.CTk):
 
     def _stop_timer(self):
         self._timer_running = False
+        self._farm_semaphore = None  # reset so next cycle gets a fresh semaphore
         if self._timer_after_id:
             self.after_cancel(self._timer_after_id)
             self._timer_after_id = None

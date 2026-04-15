@@ -14,12 +14,15 @@
       "seconds": 3.0
     },
     {
-      "action": "tap_template_or_template",
-      "template": "btn_Idle_reward.png",
-      "fallback_template": "btn_idle_reward_alt.png",
+      "action": "tap_first_found",
+      "templates": [
+        "btn_Idle_reward.png",
+        "btn_idle_reward_alt.png",
+        "btn_idle_reward_alt_2.png"
+      ],
       "required": false,
       "skip_task_if_not_found": true,
-      "log_skip": "Idle Reward not available \u00e2\u20ac\u201d skipping task"
+      "log_skip": "Idle Reward not available — skipping task"
     },
     {
       "action": "wait",
