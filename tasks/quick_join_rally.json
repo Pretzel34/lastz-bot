@@ -33,7 +33,7 @@
       "distance_pct": 75,
       "start_x_pct": 80.0,
       "start_y_pct": 92.0,
-      "note": "Attempt 1 — scroll tab bar right (increased distance)"
+      "note": "Attempt 1 \u00e2\u20ac\u201d scroll tab bar right (increased distance)"
     },
     {
       "action": "wait",
@@ -45,7 +45,7 @@
       "distance_pct": 60,
       "start_x_pct": 20.0,
       "start_y_pct": 92.0,
-      "note": "Recovery — scroll left to reset"
+      "note": "Recovery \u00e2\u20ac\u201d scroll left to reset"
     },
     {
       "action": "wait",
@@ -57,7 +57,7 @@
       "distance_pct": 85,
       "start_x_pct": 80.0,
       "start_y_pct": 92.0,
-      "note": "Attempt 2 — scroll right with larger distance"
+      "note": "Attempt 2 \u00e2\u20ac\u201d scroll right with larger distance"
     },
     {
       "action": "wait",
@@ -68,7 +68,7 @@
       "template": "btn_boomer_tab.png",
       "timeout": 5,
       "required": true,
-      "note": "Must find boomer tab — error out if still not visible after scroll retries"
+      "note": "Must find boomer tab \u00e2\u20ac\u201d error out if still not visible after scroll retries"
     },
     {
       "action": "wait",
@@ -94,11 +94,10 @@
     },
     {
       "action": "tap_template_or_zone",
-      "template": "btn_close_auto_team_up_boomer.png",
-      "x_pct": 50.0,
-      "y_pct": 50.0,
-      "required": false,
-      "note": "Close auto team-up dialog — fallback tap center if button not found"
+      "template": "btn_close_auto_rally.png",
+      "x_pct": 75.4,
+      "y_pct": 19.8,
+      "required": false
     },
     {
       "action": "wait",

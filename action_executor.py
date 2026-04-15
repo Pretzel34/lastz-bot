@@ -168,6 +168,7 @@ class ActionExecutor:
     def _dispatch(self, action_type: str, action: dict) -> ActionResult:
         handlers = {
             "rally_count_check":        self._rally_count_check,
+            "rally_count_record":       self._rally_count_record,
             "tap":                      self._tap,
             "tap_zone":                 self._tap_zone,
             "tap_template":             self._tap_template,
@@ -2409,11 +2410,14 @@ class ActionExecutor:
 
     def _rally_count_check(self, action: dict) -> ActionResult:
         """
-        Check and increment the daily rally counter for this farm.
+        Check the daily rally counter for this farm — does NOT increment.
 
         Reads logs/rally_counts.json keyed by "<port>_<YYYY-MM-DD>".
         If the count has reached rally.max_rallies_per_day → ABORT_TASK.
-        Otherwise increments the counter, saves, and returns SUCCESS.
+        Otherwise returns SUCCESS so the task continues.
+
+        The counter is only incremented by rally_count_record, which should
+        be placed after a march is actually confirmed (btn_march_on_boomer tapped).
 
         farm_settings must contain {"rally": {"max_rallies_per_day": N}}.
         """
@@ -2421,7 +2425,7 @@ class ActionExecutor:
         from pathlib import Path
         from datetime import date
 
-        rally_cfg  = self.farm_settings.get("rally", {})
+        rally_cfg   = self.farm_settings.get("rally", {})
         max_rallies = int(rally_cfg.get("max_rallies_per_day", 999))
 
         port  = getattr(self.bot, "port", 0)
@@ -2444,12 +2448,44 @@ class ActionExecutor:
             self._log(f"  ⏭ {msg}")
             return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
 
-        counts[key] = current + 1
+        msg = f"Rally count {current}/{max_rallies} — proceeding"
+        self._log(f"  ✓ {msg}")
+        return self._ok(action, msg)
+
+    def _rally_count_record(self, action: dict) -> ActionResult:
+        """
+        Increment the daily rally counter for this farm.
+
+        Call this only after a march has been successfully sent (i.e. after
+        btn_march_on_boomer is confirmed tapped). Reads/writes
+        logs/rally_counts.json keyed by "<port>_<YYYY-MM-DD>".
+        """
+        import json as _json
+        from pathlib import Path
+        from datetime import date
+
+        rally_cfg   = self.farm_settings.get("rally", {})
+        max_rallies = int(rally_cfg.get("max_rallies_per_day", 999))
+
+        port  = getattr(self.bot, "port", 0)
+        today = str(date.today())
+        key   = f"{port}_{today}"
+
+        counts_path = Path("logs/rally_counts.json")
+        counts: dict = {}
+        if counts_path.exists():
+            try:
+                with open(counts_path) as f:
+                    counts = _json.load(f)
+            except Exception:
+                counts = {}
+
+        counts[key] = counts.get(key, 0) + 1
         Path("logs").mkdir(exist_ok=True)
         with open(counts_path, "w") as f:
             _json.dump(counts, f, indent=2)
 
-        msg = f"Rally {counts[key]}/{max_rallies} — proceeding"
+        msg = f"Rally recorded: {counts[key]}/{max_rallies} sent today"
         self._log(f"  ✓ {msg}")
         return self._ok(action, msg)
 

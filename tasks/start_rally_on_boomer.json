@@ -6,14 +6,35 @@
       "note": "Abort if daily rally limit already reached"
     },
     {
-      "action": "if_template_tap",
-      "template": "btn_go_world.png",
-      "required": false,
-      "note": "If in HQ, tap to go to world. If already in world, skip."
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "note": "Guarantee a known starting state — returns to HQ if in world, no-ops if already in HQ"
     },
     {
       "action": "wait",
       "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Navigate from HQ to world view — skip if already in world"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "check_formations_busy",
+      "slots": [
+        {"x_pct": 92.6, "y_pct": 51.0},
+        {"x_pct": 92.8, "y_pct": 56.9},
+        {"x_pct": 92.6, "y_pct": 62.5},
+        {"x_pct": 92.8, "y_pct": 68.0}
+      ],
+      "locked_template": "btn_fourth_formation_locked.png",
+      "note": "Abort early if all formation slots are already occupied — no point searching for a boomer"
     },
     {
       "action": "tap_template_or_zone",
@@ -30,8 +51,9 @@
       "action": "if_template_tap",
       "template": "btn_boomer.png",
       "fallback_template": "btn_frostbane_boomer.png",
-      "required": false,
-      "note": "Select Boomer category — tries btn_boomer.png first, falls back to btn_frostbane_boomer.png"
+      "skip_task_if_not_found": true,
+      "log_skip": "Boomer search panel not found — wrong screen, cancelling task",
+      "note": "Select Boomer category. If neither template is visible the search panel didn't open — abort rather than continue on the wrong screen."
     },
     {
       "action": "wait",
@@ -83,6 +105,10 @@
       "exhaust_rallies_if_not_found": true,
       "log_skip": "March not available — troops are busy, skipping rally attempt",
       "note": "If out of fuel, restore_fuel runs automatically and retries. If march still absent, troops are busy — abort."
+    },
+    {
+      "action": "rally_count_record",
+      "note": "Only reached when march was successfully tapped — record the rally now"
     },
     {
       "action": "wait",

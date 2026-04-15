@@ -92,6 +92,10 @@
       "note": "If out of fuel, restore_fuel runs automatically and retries. If march still absent, troops are busy — abort."
     },
     {
+      "action": "rally_count_record",
+      "note": "Only reached when march was successfully tapped — record the rally now"
+    },
+    {
       "action": "wait",
       "seconds": 6.0
     }
