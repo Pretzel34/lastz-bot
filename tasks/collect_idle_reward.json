@@ -22,7 +22,7 @@
       ],
       "required": false,
       "skip_task_if_not_found": true,
-      "log_skip": "Idle Reward not available — skipping task"
+      "log_skip": "Idle Reward not available \u00e2\u20ac\u201d skipping task"
     },
     {
       "action": "wait",
@@ -56,7 +56,9 @@
       "seconds": 4.0
     },
     {
-      "action": "press_back",
+      "action": "if_template_tap",
+      "template": "btn_back_out_of_page.png",
+      "fallback_template": "btn_area_exploration_exit.png",
       "required": false,
       "finish_task_on_success": true
     },
@@ -71,11 +73,22 @@
     },
     {
       "action": "wait",
-      "seconds": 2.0
+      "seconds": 4.0
     },
     {
       "action": "if_template_tap",
       "template": "btn_end_collection.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_area_exploration_exit.png",
+      "x_pct": 8.0,
+      "y_pct": 94.5,
       "required": false
     }
   ]
