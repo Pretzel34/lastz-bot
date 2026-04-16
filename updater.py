@@ -124,23 +124,15 @@ def download_file(url: str, dest_path: str, timeout: int = 30,
 
     Streams in 1 MB chunks so large installers don't spike RAM and
     progress_callback (if provided) is called with (bytes_so_far, total_bytes).
-    """
-    try:
-        ctx = None
-        try:
-            ctx = ssl.create_default_context()
-            ctx.load_default_certs()
-        except Exception:
-            try:
-                ctx = ssl._create_unverified_context()
-            except Exception:
-                ctx = None
 
+    Uses the same three-tier SSL strategy as get_latest_release so it works
+    on machines where Python's CA bundle is absent or stale.
+    """
+    def _stream(context=None):
         req = urllib.request.Request(url, headers={"User-Agent": "LastZBot-Updater"})
         open_kwargs = {"timeout": timeout}
-        if ctx is not None:
-            open_kwargs["context"] = ctx
-
+        if context is not None:
+            open_kwargs["context"] = context
         with urllib.request.urlopen(req, **open_kwargs) as resp:
             total = int(resp.headers.get("Content-Length") or 0)
             downloaded = 0
@@ -155,6 +147,25 @@ def download_file(url: str, dest_path: str, timeout: int = 30,
                     if progress_callback:
                         progress_callback(downloaded, total)
         return True
+
+    # First attempt: default SSL verification
+    try:
+        return _stream()
+    except Exception:
+        pass
+
+    # Second attempt: Windows system certificate store
+    try:
+        ctx = ssl.create_default_context()
+        ctx.load_default_certs()
+        return _stream(context=ctx)
+    except Exception:
+        pass
+
+    # Third attempt: unverified context — nuclear fallback for machines where
+    # the CA bundle is completely absent (common in PyInstaller bundles)
+    try:
+        return _stream(context=ssl._create_unverified_context())
     except Exception:
         return False
 

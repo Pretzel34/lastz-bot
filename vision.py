@@ -591,16 +591,16 @@ class VisionEngine:
             #   1. Windows system cert store (correct fix for most machines)
             #   2. Unverified context (nuclear fallback — safe for model downloads)
             #   3. Give up patching and let EasyOCR try with defaults
+            # Patch ssl before EasyOCR init so model downloads succeed on
+            # machines where Python's CA bundle is absent or stale.
+            # We always use the unverified context — create_default_context()
+            # may succeed without throwing but still fail at connection time,
+            # so checking for an exception isn't sufficient.
             _orig = _ssl._create_default_https_context
             try:
-                _ctx = _ssl.create_default_context()
-                _ctx.load_default_certs()
-                _ssl._create_default_https_context = lambda: _ctx
+                _ssl._create_default_https_context = _ssl._create_unverified_context
             except Exception:
-                try:
-                    _ssl._create_default_https_context = _ssl._create_unverified_context
-                except Exception:
-                    pass
+                pass
 
             try:
                 # Store models in the app's persistent data directory so they
