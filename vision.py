@@ -584,17 +584,23 @@ class VisionEngine:
 
             print("[Vision] Loading OCR engine (first use may take ~10 seconds)...")
 
-            # On some Windows installs Python's bundled CA bundle is missing or
-            # stale, causing EasyOCR model downloads to fail with SSL errors.
-            # Patch the default HTTPS context to use the Windows system cert
-            # store before init, then restore it afterwards.
+            # In a PyInstaller bundle on some Windows machines, Python's CA
+            # bundle is absent entirely, so ssl.create_default_context() itself
+            # fails and our patch silently no-ops. We try three strategies in
+            # order, stopping as soon as one succeeds:
+            #   1. Windows system cert store (correct fix for most machines)
+            #   2. Unverified context (nuclear fallback — safe for model downloads)
+            #   3. Give up patching and let EasyOCR try with defaults
             _orig = _ssl._create_default_https_context
             try:
                 _ctx = _ssl.create_default_context()
                 _ctx.load_default_certs()
                 _ssl._create_default_https_context = lambda: _ctx
             except Exception:
-                pass
+                try:
+                    _ssl._create_default_https_context = _ssl._create_unverified_context
+                except Exception:
+                    pass
 
             try:
                 # Store models in the app's persistent data directory so they
