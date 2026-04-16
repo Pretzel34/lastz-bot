@@ -8,6 +8,7 @@ This is intentionally small and dependency-free (uses urllib).
 
 import json
 import os
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -51,12 +52,28 @@ def get_latest_release(owner: str, repo: str, timeout: int = 10) -> Optional[dic
     """Fetch the latest GitHub release metadata."""
     url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
     headers = {"User-Agent": "LastZBot-Updater"}
-    req = urllib.request.Request(url, headers=headers)
+
+    def _fetch(context=None):
+        req = urllib.request.Request(url, headers=headers)
+        kwargs = {"timeout": timeout}
+        if context is not None:
+            kwargs["context"] = context
+        with urllib.request.urlopen(req, **kwargs) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    # First attempt: default SSL verification
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = resp.read().decode("utf-8")
-            return json.loads(data)
-    except urllib.error.URLError:
+        return _fetch()
+    except Exception:
+        pass
+
+    # Second attempt: fall back to Windows system certificate store, which
+    # handles machines where Python's bundled CA bundle is missing or stale
+    try:
+        ctx = ssl.create_default_context()
+        ctx.load_default_certs()
+        return _fetch(context=ctx)
+    except Exception:
         return None
 
 
