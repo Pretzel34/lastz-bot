@@ -67,12 +67,19 @@ def get_latest_release(owner: str, repo: str, timeout: int = 10) -> Optional[dic
     except Exception:
         pass
 
-    # Second attempt: fall back to Windows system certificate store, which
-    # handles machines where Python's bundled CA bundle is missing or stale
+    # Second attempt: Windows system certificate store — handles machines
+    # where Python's bundled CA bundle is missing or stale
     try:
         ctx = ssl.create_default_context()
         ctx.load_default_certs()
         return _fetch(context=ctx)
+    except Exception:
+        pass
+
+    # Third attempt: unverified context — nuclear fallback for machines where
+    # the CA bundle is completely absent (common in PyInstaller bundles)
+    try:
+        return _fetch(context=ssl._create_unverified_context())
     except Exception:
         return None
 

@@ -1786,7 +1786,10 @@ class BotApp(ctk.CTk):
                                 result = executor.execute(act)
                                 if result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT):
                                     self.after(0, lambda: self._log(
-                                        "  ✗ identify_resources: failed after retry — skipping task", "warn"))
+                                        "  ✗ identify_resources: failed after retry — returning to HQ", "warn"))
+                                    executor.execute({"action": "press_back"})
+                                    executor.execute({"action": "press_back"})
+                                    executor.execute({"action": "center_hq"})
                                     task_aborted = True
                                     break
                         if not task_aborted:
