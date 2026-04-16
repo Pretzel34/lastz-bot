@@ -118,13 +118,42 @@ def check_for_update(
     return {"remote_version": remote_version, "asset_url": asset_url}
 
 
-def download_file(url: str, dest_path: str, timeout: int = 30) -> bool:
-    """Download a URL to a file path. Returns True on success."""
+def download_file(url: str, dest_path: str, timeout: int = 30,
+                  progress_callback=None) -> bool:
+    """Download a URL to a file path. Returns True on success.
+
+    Streams in 1 MB chunks so large installers don't spike RAM and
+    progress_callback (if provided) is called with (bytes_so_far, total_bytes).
+    """
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            data = resp.read()
-        with open(dest_path, "wb") as f:
-            f.write(data)
+        ctx = None
+        try:
+            ctx = ssl.create_default_context()
+            ctx.load_default_certs()
+        except Exception:
+            try:
+                ctx = ssl._create_unverified_context()
+            except Exception:
+                ctx = None
+
+        req = urllib.request.Request(url, headers={"User-Agent": "LastZBot-Updater"})
+        open_kwargs = {"timeout": timeout}
+        if ctx is not None:
+            open_kwargs["context"] = ctx
+
+        with urllib.request.urlopen(req, **open_kwargs) as resp:
+            total = int(resp.headers.get("Content-Length") or 0)
+            downloaded = 0
+            chunk_size = 1024 * 1024  # 1 MB
+            with open(dest_path, "wb") as f:
+                while True:
+                    chunk = resp.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback:
+                        progress_callback(downloaded, total)
         return True
     except Exception:
         return False
