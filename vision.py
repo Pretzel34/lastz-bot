@@ -579,8 +579,35 @@ class VisionEngine:
     def _ensure_ocr(self):
         """Lazy-load EasyOCR on first use (takes a few seconds)."""
         if self._ocr_reader is None:
-            print("[Vision] Loading OCR engine (first use, takes ~10 seconds)...")
-            self._ocr_reader = easyocr.Reader(["en"], gpu=False)
+            import ssl as _ssl
+            from paths import ensure_app_dir
+
+            print("[Vision] Loading OCR engine (first use may take ~10 seconds)...")
+
+            # On some Windows installs Python's bundled CA bundle is missing or
+            # stale, causing EasyOCR model downloads to fail with SSL errors.
+            # Patch the default HTTPS context to use the Windows system cert
+            # store before init, then restore it afterwards.
+            _orig = _ssl._create_default_https_context
+            try:
+                _ctx = _ssl.create_default_context()
+                _ctx.load_default_certs()
+                _ssl._create_default_https_context = lambda: _ctx
+            except Exception:
+                pass
+
+            try:
+                # Store models in the app's persistent data directory so they
+                # survive reinstalls and don't need to be re-downloaded each time.
+                model_dir = str(ensure_app_dir() / "models")
+                self._ocr_reader = easyocr.Reader(["en"], gpu=False,
+                                                   model_storage_directory=model_dir)
+            finally:
+                try:
+                    _ssl._create_default_https_context = _orig
+                except Exception:
+                    pass
+
             print("[Vision] OCR engine ready")
 
     def _suppress_duplicates(
