@@ -1858,7 +1858,35 @@ class BotApp(ctk.CTk):
                 if _semaphore:
                     _semaphore.release()
 
-        threading.Thread(target=do, daemon=True).start()
+        farm_thread = threading.Thread(target=do, daemon=True)
+        farm_thread.start()
+
+        # Watchdog: the internal hung-emulator logic inside do() only fires if
+        # engine.start() was called (engine._thread is not None). If the hang
+        # occurs during the launch phase — before engine.start() — engine._thread
+        # is None and that code is unreachable. This watchdog monitors the farm
+        # thread itself and force-kills if it's still alive after max_farm_timeout.
+        if self.bot_settings.get("force_kill_hung", True):
+            _w_timeout = float(self.bot_settings.get("max_farm_timeout", 40)) * 60
+            _w_name    = name
+            _w_idx     = idx
+
+            def _watchdog():
+                farm_thread.join(timeout=_w_timeout)
+                if not farm_thread.is_alive():
+                    return  # finished cleanly — nothing to do
+                self.after(0, lambda: self._log(
+                    f"  ⚠ {_w_name}: farm thread hung — force killing emulator", "warn"))
+                try:
+                    _kl = self._make_launcher(lambda m, l="info": None)
+                    _kl.stop_instance(_w_idx)
+                    self.after(0, lambda: self._log(
+                        f"  ✓ {_w_name}: hung emulator killed by watchdog", "warn"))
+                except Exception as _ke:
+                    self.after(0, lambda err=_ke: self._log(
+                        f"  ✗ {_w_name}: watchdog failed to kill emulator: {err}", "error"))
+
+            threading.Thread(target=_watchdog, daemon=True).start()
 
     def _stop_farm(self, farm: dict):
         engine = self.engines.get(farm["emu_index"])
