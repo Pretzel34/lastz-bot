@@ -1,0 +1,23 @@
+{
+  "name": "recenter_hq",
+  "actions": [
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_go_to_world_view_universal.png",
+      "x_pct": 91.5,
+      "y_pct": 95.2,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_go_to_hq_view_universal.png",
+      "x_pct": 91.7,
+      "y_pct": 95.0,
+      "required": false
+    }
+  ]
+}

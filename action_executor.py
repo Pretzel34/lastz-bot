@@ -178,6 +178,7 @@ class ActionExecutor:
             "scroll_up":                self._scroll_up,
             "center_view":              self._center_view,
             "center_hq":                self._center_hq,
+            "recenter_hq":              self._recenter_hq,
             "ensure_hq_view":           self._ensure_hq_view,
             "verify_in_hq":             self._verify_in_hq,
             "zoom_out":                 self._zoom_out,
@@ -430,6 +431,24 @@ class ActionExecutor:
         time.sleep(0.6)
         return self._ok(action, f"center_hq: fallback minimap tap ({mx},{my})")
 
+    def _recenter_hq(self, action: dict) -> ActionResult:
+        """Runs tasks/recenter_hq.json to re-center the HQ camera after scrolling."""
+        import json as _json
+        from pathlib import Path
+
+        seq_path = get_resource_dir() / "tasks" / "recenter_hq.json"
+        if not seq_path.exists():
+            return self._fail(action, f"recenter_hq: {seq_path} not found")
+        try:
+            with open(seq_path) as f:
+                data = _json.load(f)
+            actions = data.get("actions", data) if isinstance(data, dict) else data
+            for step in actions:
+                self.execute(step)
+            return self._ok(action, f"recenter_hq: ran {seq_path} ({len(actions)} steps)")
+        except Exception as e:
+            return self._fail(action, f"recenter_hq: error running {seq_path}: {e}")
+
     def _ensure_hq_view(self, action: dict) -> ActionResult:
         """
         Guarantees the player is in HQ (base) view before any task runs.
@@ -633,30 +652,69 @@ class ActionExecutor:
         if self.log_callback:
             self.log_callback(f"zoom_out: targeting '{title}' hwnd={hwnd}")
 
-        # VK codes for supported zoom keys
         VK_CODES = {
             "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73,
             "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77,
         }
-        WM_KEYDOWN = 0x0100
-        WM_KEYUP   = 0x0101
-
         vk = VK_CODES.get(zoom_key.lower())
+
+        # Force the emulator window to foreground using AttachThreadInput —
+        # bypasses Windows focus-stealing prevention that makes SetForegroundWindow
+        # silently fail when called from a non-foreground process.
+        kernel32 = ctypes.windll.kernel32
+        cur_tid    = kernel32.GetCurrentThreadId()
+        target_tid = user32.GetWindowThreadProcessId(hwnd, None)
+        fg_hwnd    = user32.GetForegroundWindow()
+        fg_tid     = user32.GetWindowThreadProcessId(fg_hwnd, None)
+
+        attached = False
+        if fg_tid and fg_tid != cur_tid:
+            user32.AttachThreadInput(cur_tid, fg_tid, True)
+            attached = True
+        user32.ShowWindow(hwnd, 9)
+        user32.SetForegroundWindow(hwnd)
+        if attached:
+            user32.AttachThreadInput(cur_tid, fg_tid, False)
+        time.sleep(0.5)
+
+        focused = user32.GetForegroundWindow()
+        if self.log_callback:
+            self.log_callback(f"zoom_out: focus set — foreground={focused} target={hwnd} match={focused==hwnd}")
+
         if vk:
-            # PostMessage sends directly to the window handle — no focus required
+            # SendInput goes through the real keyboard pipeline MEmu needs for hotkeys
+            INPUT_KEYBOARD  = 1
+            KEYEVENTF_KEYUP = 0x0002
+
+            class KEYBDINPUT(ctypes.Structure):
+                _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
+                             ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
+                             ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+
+            class INPUT(ctypes.Structure):
+                _fields_ = [("type", wintypes.DWORD), ("ki", KEYBDINPUT),
+                             ("_pad", ctypes.c_byte * 8)]
+
+            def _send(flags):
+                inp = INPUT()
+                inp.type   = INPUT_KEYBOARD
+                inp.ki.wVk = vk
+                inp.ki.dwFlags = flags
+                return user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+
             for i in range(steps):
-                user32.PostMessageW(hwnd, WM_KEYDOWN, vk, 0)
+                sent = _send(0)
                 time.sleep(0.05)
-                user32.PostMessageW(hwnd, WM_KEYUP,   vk, 0xC0000001)
+                _send(KEYEVENTF_KEYUP)
                 if self.log_callback:
-                    self.log_callback(f"zoom_out: PostMessage {zoom_key.upper()} ({i+1}/{steps}) → hwnd={hwnd}")
-                time.sleep(0.5)
+                    self.log_callback(f"zoom_out: SendInput {zoom_key.upper()} ({i+1}/{steps}) inserted={sent}")
+                if sent == 0:
+                    err = ctypes.get_last_error()
+                    if self.log_callback:
+                        self.log_callback(f"zoom_out: SendInput failed (err={err}) — possible UAC elevation mismatch; try running bot as Administrator")
+                time.sleep(0.6)
             return self._ok(action, f"zoom_out: {zoom_key.upper()} x{steps} → '{title}'")
         else:
-            # Fallback for keys not in VK table: focus window and use pyautogui
-            user32.ShowWindow(hwnd, 9)
-            user32.SetForegroundWindow(hwnd)
-            time.sleep(0.6)
             try:
                 import pyautogui
                 pyautogui.FAILSAFE = False
@@ -664,7 +722,7 @@ class ActionExecutor:
                     pyautogui.press(zoom_key)
                     if self.log_callback:
                         self.log_callback(f"zoom_out: pyautogui {zoom_key.upper()} ({i+1}/{steps})")
-                    time.sleep(0.5)
+                    time.sleep(0.6)
                 return self._ok(action, f"zoom_out: {zoom_key.upper()} x{steps} → '{title}'")
             except ImportError:
                 return self._fail(action, "zoom_out: pyautogui not installed — run: pip install pyautogui")
@@ -1576,18 +1634,30 @@ class ActionExecutor:
         if not template:
             return self._fail(action, "tap_template_search requires 'template'")
 
-        threshold    = float(action.get("threshold")) if action.get("threshold") is not None else None
-        scroll_x_pct = float(action.get("scroll_x_pct", 50))
-        scroll_y_pct = float(action.get("scroll_y_pct", 50))
-        distance_pct = float(action.get("distance_pct", 40))
-        duration_ms  = int(action.get("duration_ms", 500))
-        wait_secs    = float(action.get("wait_seconds", 1.5))
+        threshold       = float(action.get("threshold")) if action.get("threshold") is not None else None
+        scroll_x_pct    = float(action.get("scroll_x_pct", 50))
+        scroll_y_pct    = float(action.get("scroll_y_pct", 50))
+        distance_x_pct  = float(action.get("distance_x_pct", action.get("distance_pct", 50)))
+        distance_y_pct  = float(action.get("distance_y_pct", action.get("distance_pct", 40)))
+        duration_ms     = int(action.get("duration_ms", 500))
+        wait_secs       = float(action.get("wait_seconds", 1.5))
+        ignore_top_pct  = float(action.get("ignore_top_pct", 0))
 
         path = self._template_path(template)
 
         def _check():
             ss = self.bot.screenshot()
-            m  = self.vision.find_template(ss, path, threshold=threshold)
+            y_offset = 0
+            if ignore_top_pct > 0:
+                w, h = ss.size
+                y_offset = int(h * ignore_top_pct / 100)
+                ss = ss.crop((0, y_offset, w, h))
+            m = self.vision.find_template(ss, path, threshold=threshold)
+            if m and y_offset:
+                m.y += y_offset
+                if m.region:
+                    m.region = (m.region[0], m.region[1] + y_offset,
+                                m.region[2], m.region[3] + y_offset)
             self._log(f"  [tap_template_search] '{template}' found={bool(m)}")
             return m
 
@@ -1595,15 +1665,16 @@ class ActionExecutor:
             w, h = self._screen_size()
             cx = int(w * scroll_x_pct / 100)
             cy = int(h * scroll_y_pct / 100)
-            d  = int((w if direction in ("left", "right") else h) * distance_pct / 100)
+            dx = int(w * distance_x_pct / 100)
+            dy = int(h * distance_y_pct / 100)
             if direction == "down":
-                self.bot.swipe(cx, cy, cx, cy - d, duration_ms=duration_ms)
+                self.bot.swipe(cx, cy, cx, cy - dy, duration_ms=duration_ms)
             elif direction == "up":
-                self.bot.swipe(cx, cy, cx, cy + d, duration_ms=duration_ms)
+                self.bot.swipe(cx, cy, cx, cy + dy, duration_ms=duration_ms)
             elif direction == "left":
-                self.bot.swipe(cx, cy, cx + d, cy, duration_ms=duration_ms)
+                self.bot.swipe(cx, cy, cx + dx, cy, duration_ms=duration_ms)
             elif direction == "right":
-                self.bot.swipe(cx, cy, cx - d, cy, duration_ms=duration_ms)
+                self.bot.swipe(cx, cy, cx - dx, cy, duration_ms=duration_ms)
             _time.sleep(wait_secs)
 
         # Initial check — no scroll yet
@@ -1612,14 +1683,19 @@ class ActionExecutor:
             self.bot.tap(match.x, match.y)
             return self._ok(action, f"tap_template_search: '{template}' found (no scroll)")
 
-        for direction in ("down", "left", "up", "right", "down"):
+        scrolled = False
+        for direction in ("left", "left", "up", "right", "right", "right", "right", "down", "left", "left"):
             self._log(f"  [tap_template_search] not found — scrolling {direction}")
             _scroll(direction)
+            scrolled = True
             match = _check()
             if match:
                 self.bot.tap(match.x, match.y)
+                self.execute({"action": "recenter_hq"})
                 return self._ok(action, f"tap_template_search: '{template}' found after scroll {direction}")
 
+        if scrolled:
+            self.execute({"action": "recenter_hq"})
         self._log(f"  [tap_template_search] '{template}' not found after full search — skipping")
         return self._ok(action, f"tap_template_search: '{template}' not found, skipped")
 

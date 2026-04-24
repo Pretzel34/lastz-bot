@@ -12,17 +12,9 @@
       "seconds": 4.0
     },
     {
-      "action": "zoom_out",
-      "steps": 3,
-      "note": "F3 x3 to zoom out"
-    },
-    {
-      "action": "wait",
-      "seconds": 4.0
-    },
-    {
       "action": "tap_template_search",
       "template": "btn_collect_xp.png",
+      "ignore_top_pct": 10,
       "note": "Search for XP collect button across full HQ view"
     },
     {
@@ -32,6 +24,7 @@
     {
       "action": "tap_template_search",
       "template": "btn_collect_food_production.png",
+      "ignore_top_pct": 10,
       "note": "Search for food production collect button"
     },
     {
@@ -41,6 +34,7 @@
     {
       "action": "tap_template_search",
       "template": "btn_collect_wood_production.png",
+      "ignore_top_pct": 10,
       "note": "Search for wood production collect button"
     },
     {
@@ -50,6 +44,7 @@
     {
       "action": "tap_template_search",
       "template": "btn_collect_zent_production.png",
+      "ignore_top_pct": 10,
       "note": "Search for zent production collect button"
     },
     {
@@ -59,6 +54,7 @@
     {
       "action": "tap_template_search",
       "template": "btn_collect_energy_production.png",
+      "ignore_top_pct": 10,
       "note": "Search for energy production collect button"
     },
     {
@@ -68,11 +64,16 @@
     {
       "action": "tap_template_search",
       "template": "btn_collect_alloy_production.png",
+      "ignore_top_pct": 10,
       "note": "Search for alloy production collect button"
     },
     {
       "action": "wait",
       "seconds": 2.0
+    },
+    {
+      "action": "center_hq",
+      "note": "Run tasks/center_hq.json to reset camera"
     }
   ]
 }

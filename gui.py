@@ -98,7 +98,8 @@ DAILY_TASKS = [
     ("Collect Fuel",         "Collect Fuel",         True),
     ("Read Mail",            "Read Mail",            True),
     ("collect_recruits",     "Collect Recruits",     True),
-    ("healing",              "Enable Heal Troops",   False),
+    ("healing",                   "Enable Heal Troops",        False),
+    ("collect_building_resource", "Collect Building Resources", True),
 ]
 
 # Rally task JSON files — (setting_key, label, json_filename)
