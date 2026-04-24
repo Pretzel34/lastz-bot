@@ -2,11 +2,8 @@
   "name": "collect_idle_reward",
   "actions": [
     {
-      "action": "ensure_hq_view",
-      "hq_btn": "btn_go_world.png",
-      "world_btn": "btn_go_headquarters.png",
-      "x_pct": 91.1,
-      "y_pct": 95.6,
+      "action": "verify_in_hq",
+      "required": true,
       "note": "Verify we are in HQ view before starting"
     },
     {
@@ -87,8 +84,6 @@
     {
       "action": "tap_template_or_zone",
       "template": "btn_area_exploration_exit.png",
-      "x_pct": 8.0,
-      "y_pct": 94.5,
       "required": false
     }
   ]

@@ -33,6 +33,10 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Stamp version.py from tag
+        shell: bash
+        run: echo "__version__ = \"${{ steps.version.outputs.version }}\"" > version.py
+
       - name: Build executable
         run: .\build_windows.bat
         shell: cmd

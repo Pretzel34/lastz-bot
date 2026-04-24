@@ -201,6 +201,7 @@ class ActionExecutor:
             "check_formations_busy":    self._check_formations_busy,
             "tap_template_or_zone":     self._tap_template_or_zone,
             "find_template_with_scroll": self._find_template_with_scroll,
+            "tap_template_search":      self._tap_template_search,
             "tap_template_or_template": self._tap_template_or_template,
             "tap_first_found":          self._tap_first_found,
             "tap_template_or_ocr_pattern": self._tap_template_or_ocr_pattern,
@@ -579,30 +580,44 @@ class ActionExecutor:
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
         user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
 
-        bare_title = profile["window_title_bare"]
         if self.log_callback:
             self.log_callback(f"zoom_out: visible windows found: {len(all_windows)}")
-            for h, t in all_windows:
-                if bare_title in t or any(k in t for k in ["Last", "Play"]):
-                    self.log_callback(f"  >> hwnd={h}  title='{t}'")
 
         hwnd, title = None, ""
 
-        # Try to match the exact instance window using port → 1-based index
+        # Find the emulator window by process name — reliable regardless of window title
+        process_name = profile["process_name"]
         try:
-            port  = self.bot.port if hasattr(self.bot, "port") else profile["port_base"]
-            index = port_to_index(port, self.emulator_type)   # 0-based
-            n     = index + 1                                  # 1-based for title
-            target_title = profile["window_title"].format(n=n)
-            for h, t in all_windows:
-                if t == target_title:
-                    hwnd, title = h, t
-                    break
-        except Exception:
-            pass
+            import subprocess as _sp
+            result = _sp.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {process_name}", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=5
+            )
+            proc_pids = set()
+            for line in result.stdout.strip().splitlines():
+                parts = line.strip('"').split('","')
+                if len(parts) >= 2:
+                    try:
+                        proc_pids.add(int(parts[1]))
+                    except ValueError:
+                        pass
 
-        # Fallback: any window whose title starts with the bare title
+            if proc_pids:
+                for h, t in all_windows:
+                    pid = wintypes.DWORD()
+                    user32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+                    if pid.value in proc_pids:
+                        hwnd, title = h, t
+                        if self.log_callback:
+                            self.log_callback(f"zoom_out: matched '{t}' hwnd={h} via {process_name} pid={pid.value}")
+                        break
+        except Exception as e:
+            if self.log_callback:
+                self.log_callback(f"zoom_out: process match failed ({e}) — falling back to title")
+
+        # Fallback: match by window title if process search failed
         if not hwnd:
+            bare_title = profile["window_title_bare"]
             for h, t in all_windows:
                 if t == bare_title or t.startswith(bare_title):
                     hwnd, title = h, t
@@ -618,28 +633,41 @@ class ActionExecutor:
         if self.log_callback:
             self.log_callback(f"zoom_out: targeting '{title}' hwnd={hwnd}")
 
-        # Focus window
-        user32.ShowWindow(hwnd, 9)
-        user32.SetForegroundWindow(hwnd)
-        time.sleep(0.6)
+        # VK codes for supported zoom keys
+        VK_CODES = {
+            "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73,
+            "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77,
+        }
+        WM_KEYDOWN = 0x0100
+        WM_KEYUP   = 0x0101
 
-        # Verify focus
-        focused = user32.GetForegroundWindow()
-        if self.log_callback:
-            self.log_callback(f"zoom_out: foreground hwnd={focused} (expected {hwnd}) match={focused==hwnd}")
-
-        # Send zoom key
-        try:
-            import pyautogui
-            pyautogui.FAILSAFE = False
+        vk = VK_CODES.get(zoom_key.lower())
+        if vk:
+            # PostMessage sends directly to the window handle — no focus required
             for i in range(steps):
-                pyautogui.press(zoom_key)
+                user32.PostMessageW(hwnd, WM_KEYDOWN, vk, 0)
+                time.sleep(0.05)
+                user32.PostMessageW(hwnd, WM_KEYUP,   vk, 0xC0000001)
                 if self.log_callback:
-                    self.log_callback(f"zoom_out: sent {zoom_key.upper()} ({i+1}/{steps})")
-                time.sleep(0.4)
+                    self.log_callback(f"zoom_out: PostMessage {zoom_key.upper()} ({i+1}/{steps}) → hwnd={hwnd}")
+                time.sleep(0.5)
             return self._ok(action, f"zoom_out: {zoom_key.upper()} x{steps} → '{title}'")
-        except ImportError:
-            return self._fail(action, "zoom_out: pyautogui not installed — run: pip install pyautogui")
+        else:
+            # Fallback for keys not in VK table: focus window and use pyautogui
+            user32.ShowWindow(hwnd, 9)
+            user32.SetForegroundWindow(hwnd)
+            time.sleep(0.6)
+            try:
+                import pyautogui
+                pyautogui.FAILSAFE = False
+                for i in range(steps):
+                    pyautogui.press(zoom_key)
+                    if self.log_callback:
+                        self.log_callback(f"zoom_out: pyautogui {zoom_key.upper()} ({i+1}/{steps})")
+                    time.sleep(0.5)
+                return self._ok(action, f"zoom_out: {zoom_key.upper()} x{steps} → '{title}'")
+            except ImportError:
+                return self._fail(action, "zoom_out: pyautogui not installed — run: pip install pyautogui")
 
     def _scroll_right(self, action: dict) -> ActionResult:
         """Scroll view right — finger starts at bottom-right, swipes left along bottom row."""
@@ -1525,6 +1553,75 @@ class ActionExecutor:
         # ── Not found after both scrolls ─────────────────────────────────
         self._log(f"  ⚠ {not_found_msg}")
         return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=not_found_msg)
+
+    def _tap_template_search(self, action: dict) -> ActionResult:
+        """
+        Search for a template across the full HQ view using a 5-scroll sweep:
+        down → left → up → right → down. Taps it if found at any point.
+        If not found after all scrolls, logs a warning and continues (never aborts task).
+
+        Parameters
+        ----------
+        template       : template filename to search for and tap (required)
+        scroll_x_pct   : X centre of scroll swipe as % of screen width  (default 50)
+        scroll_y_pct   : Y centre of scroll swipe as % of screen height (default 50)
+        distance_pct   : swipe distance as % of screen dimension        (default 40)
+        duration_ms    : swipe duration in milliseconds                  (default 500)
+        wait_seconds   : pause after each scroll before rechecking       (default 1.5)
+        threshold      : vision confidence override (optional)
+        """
+        import time as _time
+
+        template = action.get("template")
+        if not template:
+            return self._fail(action, "tap_template_search requires 'template'")
+
+        threshold    = float(action.get("threshold")) if action.get("threshold") is not None else None
+        scroll_x_pct = float(action.get("scroll_x_pct", 50))
+        scroll_y_pct = float(action.get("scroll_y_pct", 50))
+        distance_pct = float(action.get("distance_pct", 40))
+        duration_ms  = int(action.get("duration_ms", 500))
+        wait_secs    = float(action.get("wait_seconds", 1.5))
+
+        path = self._template_path(template)
+
+        def _check():
+            ss = self.bot.screenshot()
+            m  = self.vision.find_template(ss, path, threshold=threshold)
+            self._log(f"  [tap_template_search] '{template}' found={bool(m)}")
+            return m
+
+        def _scroll(direction):
+            w, h = self._screen_size()
+            cx = int(w * scroll_x_pct / 100)
+            cy = int(h * scroll_y_pct / 100)
+            d  = int((w if direction in ("left", "right") else h) * distance_pct / 100)
+            if direction == "down":
+                self.bot.swipe(cx, cy, cx, cy - d, duration_ms=duration_ms)
+            elif direction == "up":
+                self.bot.swipe(cx, cy, cx, cy + d, duration_ms=duration_ms)
+            elif direction == "left":
+                self.bot.swipe(cx, cy, cx + d, cy, duration_ms=duration_ms)
+            elif direction == "right":
+                self.bot.swipe(cx, cy, cx - d, cy, duration_ms=duration_ms)
+            _time.sleep(wait_secs)
+
+        # Initial check — no scroll yet
+        match = _check()
+        if match:
+            self.bot.tap(match.x, match.y)
+            return self._ok(action, f"tap_template_search: '{template}' found (no scroll)")
+
+        for direction in ("down", "left", "up", "right", "down"):
+            self._log(f"  [tap_template_search] not found — scrolling {direction}")
+            _scroll(direction)
+            match = _check()
+            if match:
+                self.bot.tap(match.x, match.y)
+                return self._ok(action, f"tap_template_search: '{template}' found after scroll {direction}")
+
+        self._log(f"  [tap_template_search] '{template}' not found after full search — skipping")
+        return self._ok(action, f"tap_template_search: '{template}' not found, skipped")
 
     def _tap_template_or_template(self, action: dict) -> ActionResult:
         """

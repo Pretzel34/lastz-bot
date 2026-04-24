@@ -1,0 +1,78 @@
+{
+  "name": "collect_building_resource",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_to_world_view.png",
+      "world_btn": "btn_go_to_hq_view.png",
+      "note": "Ensure HQ view before task"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "zoom_out",
+      "steps": 3,
+      "note": "F3 x3 to zoom out"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_collect_xp.png",
+      "note": "Search for XP collect button across full HQ view"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_collect_food_production.png",
+      "note": "Search for food production collect button"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_collect_wood_production.png",
+      "note": "Search for wood production collect button"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_collect_zent_production.png",
+      "note": "Search for zent production collect button"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_collect_energy_production.png",
+      "note": "Search for energy production collect button"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_collect_alloy_production.png",
+      "note": "Search for alloy production collect button"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    }
+  ]
+}

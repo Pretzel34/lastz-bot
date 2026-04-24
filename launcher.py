@@ -69,14 +69,14 @@ EMULATOR_PROFILES = {
         "port_base":         62001,
         "port_step":         24,
         "process_name":      "Nox.exe",
-        "window_title":      "NoxPlayer",
-        "window_title_bare": "NoxPlayer",
+        "window_title":      "LastZ",
+        "window_title_bare": "LastZ",
         "cli_exe":           "NoxConsole.exe",
         "adb_exe":           "nox_adb.exe",
         "cli_start":         ["launch", "-index:{index}"],
         "cli_stop":          ["quit",   "-index:{index}"],
         "cli_list":          ["list"],
-        "zoom_key":          None,
+        "zoom_key":          "f3",
     },
 }
 

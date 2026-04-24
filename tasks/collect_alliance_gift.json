@@ -2,8 +2,9 @@
   "name": "collect_alliance_gift",
   "actions": [
     {
-      "action": "if_template_tap",
-      "template": "btn_alliance_icon.png",
+      "action": "tap_template_or_template",
+      "template": "btn_alliance_icon_alt.png",
+      "fallback_template": "btn_alliance_icon.png",
       "required": true
     },
     {
@@ -20,8 +21,10 @@
       "seconds": 4.0
     },
     {
-      "action": "if_template_tap",
+      "action": "tap_template_or_zone",
       "template": "btn_claim_all_alliance_gifts.png",
+      "x_pct": 51.1,
+      "y_pct": 96.0,
       "required": false
     },
     {
@@ -29,8 +32,10 @@
       "seconds": 4.0
     },
     {
-      "action": "if_template_tap",
+      "action": "tap_template_or_zone",
       "template": "btn_recieved_gifts_alliance.png",
+      "x_pct": 50.6,
+      "y_pct": 27.3,
       "required": false
     },
     {
@@ -38,17 +43,22 @@
       "seconds": 4.0
     },
     {
-      "action": "if_template_tap",
+      "action": "tap_template_or_zone",
       "template": "btn_collect_rare.png",
-      "required": false
+      "x_pct": 75.4,
+      "y_pct": 36.8,
+      "required": false,
+      "note": "Looking for Rare tab"
     },
     {
       "action": "wait",
       "seconds": 4.0
     },
     {
-      "action": "if_template_tap",
+      "action": "tap_template_or_zone",
       "template": "btn_claim_all_alliance_gifts.png",
+      "x_pct": 51.9,
+      "y_pct": 95.1,
       "required": false
     },
     {
@@ -56,8 +66,10 @@
       "seconds": 4.0
     },
     {
-      "action": "if_template_tap",
+      "action": "tap_template_or_zone",
       "template": "btn_recieved_gifts_alliance.png",
+      "x_pct": 49.8,
+      "y_pct": 29.5,
       "required": false
     },
     {
