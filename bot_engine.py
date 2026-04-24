@@ -196,6 +196,9 @@ class BotEngine:
         self.on_state_change: Optional[Callable[[EngineState], None]] = None
         self.on_stats_update: Optional[Callable[[SessionStats], None]] = None
         self.on_action_complete: Optional[Callable[[dict, bool], None]] = None
+        # Called when ADB device disconnect is detected mid-run; should close and
+        # reopen the emulator instance, update engine.bot, and return True on success.
+        self.on_device_not_found: Optional[Callable[[], bool]] = None
 
         # Recording
         self.recorder = None   # ScreenRecorder instance, set via enable_recording()
@@ -479,6 +482,10 @@ class BotEngine:
         self._log(f"✓ Task '{name}' complete")
         return True
 
+    def _is_device_disconnect(self, message: str) -> bool:
+        msg = message.lower()
+        return "not found" in msg and ("device" in msg or "127.0.0.1" in msg)
+
     def _recover_view(self):
         """
         Error recovery — determine current view state and navigate back to HQ.
@@ -520,6 +527,20 @@ class BotEngine:
 
         # Only recover on hard failures — not on SKIPPED or ABORT_TASK
         hard_failure = result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
+
+        # ADB device disconnect: pause execution, restart emulator, then retry once
+        if hard_failure and self._is_device_disconnect(result.message):
+            self._log("  ⚠ ADB device not found — pausing tasks to restart emulator...")
+            self._log("  ⚠ Troubleshooting: close and reopen the emulator instance to restore the ADB connection")
+            if self.on_device_not_found:
+                reconnected = self.on_device_not_found()
+                if reconnected:
+                    self._log("  ✓ Emulator reconnected — resuming")
+                    result = self.executor.execute(action)
+                    hard_failure = result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
+                else:
+                    self._log("  ✗ Emulator restart failed — continuing with remaining tasks")
+
         if hard_failure and should_retry and action.get("required", True):
             for attempt in range(1, max_retries + 1):
                 if self._stop_event.is_set():

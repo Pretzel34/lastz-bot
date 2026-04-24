@@ -179,6 +179,7 @@ class ActionExecutor:
             "center_view":              self._center_view,
             "center_hq":                self._center_hq,
             "ensure_hq_view":           self._ensure_hq_view,
+            "verify_in_hq":             self._verify_in_hq,
             "zoom_out":                 self._zoom_out,
             "scroll_right":             self._scroll_right,
             "scroll_left":              self._scroll_left,
@@ -500,6 +501,52 @@ class ActionExecutor:
             self.bot.tap(x, y)
             time.sleep(2.0)
             return self._ok(action, "ensure_hq_view: unknown state, tapped tap_zone")
+
+    def _verify_in_hq(self, action: dict) -> ActionResult:
+        """
+        Confirms the player is in HQ view using universal view-toggle buttons.
+
+        Logic:
+          1. Look for btn_go_to_world_view_universal.png — visible only in HQ view.
+             If found, we are already in HQ; proceed without tapping.
+          2. If not found, look for btn_go_to_hq_view_universal.png — visible only in world view.
+             If found, tap it to return to HQ, then proceed.
+          3. If neither found and required=true, fail.
+        """
+        import time
+
+        HQ_BTN    = "btn_go_to_world_view_universal.png"
+        WORLD_BTN = "btn_go_to_hq_view_universal.png"
+        required  = action.get("required", True)
+
+        screenshot = self.bot.screenshot()
+        hq_path    = self._template_path(HQ_BTN)
+        world_path = self._template_path(WORLD_BTN)
+
+        in_hq    = self.vision.find_template(screenshot, hq_path)    is not None
+        in_world = self.vision.find_template(screenshot, world_path) is not None
+
+        if self.log_callback:
+            self.log_callback(f"verify_in_hq: in_hq={in_hq} in_world={in_world}")
+
+        if in_hq:
+            if self.log_callback:
+                self.log_callback("verify_in_hq: HQ view confirmed — no action needed")
+            return self._ok(action, "verify_in_hq: already in HQ")
+
+        if in_world:
+            match = self.vision.find_template(screenshot, world_path)
+            if self.log_callback:
+                self.log_callback(f"verify_in_hq: world view — tapping {WORLD_BTN} to return to HQ")
+            self.bot.tap(match.x, match.y)
+            time.sleep(2.0)
+            return self._ok(action, "verify_in_hq: world→HQ via tap")
+
+        if required:
+            return self._fail(action, "verify_in_hq: neither HQ nor world view button found")
+        if self.log_callback:
+            self.log_callback("verify_in_hq: neither button found — skipping (not required)")
+        return self._ok(action, "verify_in_hq: unknown state, skipped")
 
     def _zoom_out(self, action: dict) -> ActionResult:
         """

@@ -164,3 +164,31 @@ python capture_tool.py           # screenshot + template capture utility
 ```
 
 Logs written to `logs/`. Enable `screenshot_on_error` in bot_settings to capture failure screenshots.
+
+---
+
+## Session Log
+
+> This section is maintained automatically. Each entry captures what was worked on, decisions made, and what's pending. Claude should read this at the start of each session to restore context, and update it at the end (or when asked to "save to memory" / "update the log").
+
+<!-- LATEST ENTRY AT TOP -->
+
+### 2026-04-13
+- **Topic:** Task verification + self-healing execution design
+- **Discussed:** Two approaches to action verification:
+  1. `verify` field in task JSON (post-action template assertion) — tabled for now, revisit later
+  2. **Self-healing execution loop** — preferred approach, to be implemented
+- **Self-healing design (agreed upon):**
+  - Action attempted → if fails → recovery routine → retry → if success: continue / if still failing: log report + skip to next task
+  - Recovery steps (in order): wait + retry (lag), press back 1-2x (unexpected popup/dialog), re-run `ensure_hq_view` (wrong view state), give up (unknown state)
+  - Recovery happens silently — only escalates to a report if all steps exhausted
+  - Failure report should include: task name, action index, recovery steps attempted, screenshot of final state
+  - `action_executor.py` handles recovery logic; signals `bot_engine.py` with "unrecoverable" to skip to next task
+- **Pending:** Implementation of self-healing loop in `action_executor.py` + `bot_engine.py`
+- **TODO:** Test `collect_radar` changes at next reset — verify laura radar log_skip, collect loop, first-tap popup dismissal, and repeat_if_template behavior
+- **TODO:** Review `collect_vip_rewards` task — check current implementation and identify any improvements needed
+
+### 2026-04-13 (earlier)
+- **Topic:** Persistent memory setup
+- **Done:** Added this Session Log section to CLAUDE.md so context carries over between Cowork sessions automatically.
+- **How it works:** Since CLAUDE.md is loaded at the start of every session, anything logged here is instantly available next time — no extra steps needed.

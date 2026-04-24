@@ -1811,6 +1811,29 @@ class BotApp(ctk.CTk):
                 engine.load_tasks(tasks)
                 engine.set_farm_settings(farm.get("tasks", {}))
                 engine.config["bot"]["loop_tasks"] = self.bot_settings.get("loop_tasks", False)
+
+                def _on_device_not_found():
+                    self.after(0, lambda: self._log(
+                        f"  🔄 {name}: ADB lost — closing and reopening emulator...", "warn"))
+                    try:
+                        launcher.stop_instance(idx)
+                    except Exception:
+                        pass
+                    ok = launcher.launch_and_connect(index=idx, wait_for_game=True)
+                    if not ok:
+                        self.after(0, lambda: self._log(
+                            f"  ✗ {name}: emulator relaunch failed", "error"))
+                        return False
+                    new_bot = launcher.get_bot(idx)
+                    if not new_bot:
+                        return False
+                    engine.bot = new_bot
+                    engine.executor.bot = new_bot
+                    self.after(0, lambda: self._log(
+                        f"  ✓ {name}: emulator reconnected — resuming tasks", "success"))
+                    return True
+
+                engine.on_device_not_found = _on_device_not_found
                 engine.start()
                 self.after(0, lambda: self._log(
                     f"✓ {name} running — {len(tasks)} task(s) loaded", "success"))

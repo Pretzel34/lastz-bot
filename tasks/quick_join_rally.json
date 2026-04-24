@@ -2,26 +2,20 @@
   "name": "quick_join_rally",
   "actions": [
     {
-      "action": "ensure_hq_view",
-      "hq_btn": "btn_go_world.png",
-      "world_btn": "btn_go_headquarters.png",
-      "x_pct": 91.1,
-      "y_pct": 95.6,
+      "action": "verify_in_hq",
+      "required": true,
       "note": "Verify we are in HQ view before starting"
-    },
-    {
-      "action": "wait",
-      "seconds": 3.0
     },
     {
       "action": "wait",
       "seconds": 6.0
     },
     {
-      "action": "tap_zone",
-      "x_pct": 92.8,
-      "y_pct": 8.0,
-      "note": "Event Center"
+      "action": "tap_template_or_zone",
+      "template": "btn_event_center.png",
+      "x_pct": 93.0,
+      "y_pct": 8.3,
+      "required": true
     },
     {
       "action": "wait",
@@ -64,8 +58,9 @@
       "seconds": 2.0
     },
     {
-      "action": "tap_template",
+      "action": "tap_template_or_template",
       "template": "btn_boomer_tab.png",
+      "fallback_template": "btn_boomer_tab_alt.png",
       "timeout": 5,
       "required": true,
       "note": "Must find boomer tab \u00e2\u20ac\u201d error out if still not visible after scroll retries"
@@ -75,8 +70,10 @@
       "seconds": 6.0
     },
     {
-      "action": "if_template_tap",
+      "action": "tap_template_or_zone",
       "template": "btn_aut_team_boomer.png",
+      "x_pct": 51.1,
+      "y_pct": 86.1,
       "required": false
     },
     {
@@ -84,8 +81,10 @@
       "seconds": 6.0
     },
     {
-      "action": "if_template_tap",
+      "action": "tap_template_or_zone",
       "template": "btn_activate_boomer_rally.png",
+      "x_pct": 66.7,
+      "y_pct": 79.8,
       "required": false
     },
     {

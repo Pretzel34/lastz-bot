@@ -12,7 +12,20 @@
       "Bash(python3 -c \":*)",
       "Bash(grep:*)",
       "Read(//c/Program Files \\(x86\\)/NSIS/**)",
-      "Read(//c/Program Files/**)"
+      "Read(//c/Program Files/**)",
+      "Bash(gh run:*)",
+      "Bash(gh release:*)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(taskkill /F /IM python.exe /FI \"WINDOWTITLE eq LAST Z BOT\")",
+      "Bash(tasklist)",
+      "Bash(taskkill:*)",
+      "Bash(cmd:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Read(//c/Users/Preston/AppData/Roaming/Microvirt/**)",
+      "Read(//c/Users/Preston/AppData/Local/Microvirt/MEmu/**)",
+      "Read(//c/ProgramData/**)"
     ]
   },
   "enableAllProjectMcpServers": true,
