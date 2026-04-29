@@ -26,7 +26,7 @@ from PIL import Image, ImageTk
 import customtkinter as ctk
 
 import version
-from paths import ensure_app_dir, get_farms_path, get_resource_dir
+from paths import ensure_app_dir, get_farms_path, get_resource_dir, get_app_dir
 from updater import check_for_update, download_and_launch
 from emulator_config import (
     find_memu_config, check_memu_settings, apply_memu_fixes, is_memu_running,
@@ -272,6 +272,7 @@ class BotApp(ctk.CTk):
             "max_retries": 2,
             "loop_tasks": False,
             "loop_delay": 60,
+            "keep_running": False,
             "screenshot_on_error": True,
             "auto_arrange": True,
             "minimum_cycle_time": 60,
@@ -706,6 +707,7 @@ class BotApp(ctk.CTk):
         self._setting_row(card2, "Loop Tasks Continuously",        "toggle", "loop_tasks")
         self._setting_row(card2, "Loop Delay (seconds)",           "number", "loop_delay")
         self._setting_row(card2, "Minimum Cycle Time (in Minutes)", "number", "minimum_cycle_time")
+        self._setting_row(card2, "Keep Running (Auto-Restart)",    "toggle", "keep_running")
         self._setting_row(card2, "Retry Failed Actions",    "toggle", "retry_failed")
         self._setting_row(card2, "Max Retries",             "number", "max_retries")
         self._setting_row(card2, "Screenshot on Error",     "toggle", "screenshot_on_error")
@@ -1949,7 +1951,27 @@ class BotApp(ctk.CTk):
         self._record_runs = not self._record_runs
         self._log(f"Run recording {'ON' if self._record_runs else 'OFF'}.", "info")
 
+    # ── Keep Running flag ─────────────────────────────────────────────────
+
+    @property
+    def _keep_running_flag(self) -> Path:
+        return get_app_dir() / "keep_running.flag"
+
+    def _set_keep_running_flag(self):
+        if self.bot_settings.get("keep_running", False):
+            try:
+                self._keep_running_flag.write_text("1")
+            except Exception:
+                pass
+
+    def _clear_keep_running_flag(self):
+        try:
+            self._keep_running_flag.unlink(missing_ok=True)
+        except Exception:
+            pass
+
     def _start_all(self):
+        self._set_keep_running_flag()
         self._halted.clear()  # allow farm threads to run
         max_concurrent = int(self.bot_settings.get("max_concurrent_sessions", 1))
         # Reuse existing semaphore if still active; create a new one only when starting fresh
@@ -1966,6 +1988,7 @@ class BotApp(ctk.CTk):
             self._start_farm(farm, _semaphore=sem)
 
     def _stop_all(self):
+        self._clear_keep_running_flag()
         self._halted.set()  # signal all queued farm threads to abort when they acquire the semaphore
         self._farm_semaphore = None  # reset so the next Start gets a fresh semaphore
         for farm in self.farms:
@@ -2528,6 +2551,7 @@ class BotApp(ctk.CTk):
 
         # Stop all running engines before the installer replaces the exe
         def apply_update():
+            self._clear_keep_running_flag()
             self._log(f"Update {remote} downloaded — installing now...", "success")
             for engine in self.engines.values():
                 try:
@@ -2544,6 +2568,7 @@ class BotApp(ctk.CTk):
     # ── Close ─────────────────────────────────────────────────────────────
 
     def _on_close(self):
+        self._clear_keep_running_flag()
         for engine in self.engines.values():
             try:
                 if engine.state == EngineState.RUNNING:
@@ -2571,3 +2596,24 @@ if __name__ == "__main__":
 
     app = BotApp()
     app.mainloop()
+
+    # Keep Running: if the flag is still present after mainloop exits, the
+    # closure was unexpected (not Stop or X). Spawn a detached batch that
+    # waits a few seconds then re-launches the exe, giving the current process
+    # time to fully exit and release the single-instance mutex first.
+    import subprocess as _sp, tempfile as _tf
+    _flag = get_app_dir() / "keep_running.flag"
+    if _flag.exists():
+        if getattr(sys, "frozen", False):
+            _launch_cmd = f'start "" "{sys.executable}"'
+        else:
+            _launch_cmd = f'start "" "{sys.executable}" "{Path(__file__).resolve()}"'
+        _bat = Path(_tf.gettempdir()) / "lastz_restart.bat"
+        _bat.write_text(
+            f"@echo off\ntimeout /t 4 /nobreak > nul\n{_launch_cmd}\ndel \"%~f0\"\n"
+        )
+        _sp.Popen(
+            ["cmd.exe", "/c", str(_bat)],
+            creationflags=_sp.DETACHED_PROCESS | _sp.CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+        )
