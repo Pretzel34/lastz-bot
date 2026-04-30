@@ -99,7 +99,12 @@ DAILY_TASKS = [
     ("Read Mail",            "Read Mail",            True),
     ("collect_recruits",     "Collect Recruits",     True),
     ("healing",                   "Enable Heal Troops",        False),
-    ("collect_building_resource", "Collect Building Resources", True),
+    ("collect_building_resource",  "Collect Building Resources", True),
+]
+
+# Alliance Mining task JSON files — (setting_key, label, json_filename)
+ALLIANCE_MINING_TASKS = [
+    ("gather_alliance_building", "Gather Alliance Building", "gather_alliance_building"),
 ]
 
 # Rally task JSON files — (setting_key, label, json_filename)
@@ -172,6 +177,15 @@ TASK_CATEGORIES = [
             {"key": "donate_to_alliance",     "label": "Donate In Alliance Tech", "type": "toggle", "default": True},
             {"key": "help_allies",            "label": "Help Allies",             "type": "toggle", "default": True},
             {"key": "collect_alliance_gift",  "label": "Collect Alliance Gift",   "type": "toggle", "default": True},
+        ]
+    },
+    {
+        "key":   "alliance_mining",
+        "label": "Alliance Mining",
+        "icon":  "⛏️",
+        "settings": [
+            {"key": "enabled",                   "label": "Enable Alliance Mining",   "type": "toggle", "default": True},
+            {"key": "gather_alliance_building",  "label": "Gather Alliance Building", "type": "toggle", "default": True},
         ]
     },
 ]
@@ -2140,6 +2154,28 @@ class BotApp(ctk.CTk):
                     self._log(f"  ⚠ {label} — tasks/{json_key}.json not found, skipping", "warn")
         else:
             self._log("  Alliance disabled — skipping all alliance tasks", "warn")
+
+        # ── Alliance Mining tasks ─────────────────────────────────────
+        alliance_mining_cfg = farm_tasks.get("alliance_mining", {})
+        if alliance_mining_cfg.get("enabled", True):
+            for key, label, json_key in ALLIANCE_MINING_TASKS:
+                if not alliance_mining_cfg.get(key, True):
+                    self._log(f"  ⏭ Skipping {label} (disabled)", "info")
+                    continue
+                json_file = tasks_dir / f"{json_key}.json"
+                if json_file.exists():
+                    try:
+                        with open(json_file) as f:
+                            data = _json.load(f)
+                        actions = data.get("actions", data) if isinstance(data, dict) else data
+                        tasks.append({"name": label, "actions": actions})
+                        self._log(f"  ✓ {label} — {len(actions)} actions", "info")
+                    except Exception as e:
+                        self._log(f"  ✗ Failed to load {json_file.name}: {e}", "error")
+                else:
+                    self._log(f"  ⚠ {label} — tasks/{json_key}.json not found, skipping", "warn")
+        else:
+            self._log("  Alliance Mining disabled — skipping", "warn")
 
         return tasks
 

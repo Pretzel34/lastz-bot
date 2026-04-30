@@ -1,0 +1,126 @@
+{
+  "name": "gather_alliance_building",
+  "actions": [
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_alliance_icon_alt.png",
+      "fallback_templates": ["btn_alliance_tab_alt.png", "btn_alliance_icon_alt_1.png"],
+      "on_not_found": [
+        {
+          "action": "tap_template_or_zone",
+          "template": "btn_go_to_hq_view_universal.png",
+          "x_pct": 90.9,
+          "y_pct": 95.3,
+          "required": false
+        }
+      ]
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_alliance_building.png",
+      "x_pct": 58.3,
+      "y_pct": 69.8,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_alliance_mine.png",
+      "x_pct": 24.4,
+      "y_pct": 94.4,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_active_alliance_mine",
+      "skip_task_if_not_found": true,
+      "note": "Tap whichever mine has coordinates active"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 50.4,
+      "y_pct": 51.9,
+      "note": "Alliance Resource Building"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_gather_resource.png",
+      "on_not_found": [
+        {
+          "action": "tap_template_or_zone",
+          "template": "btn_go_to_hq_view_universal.png",
+          "x_pct": 90.9,
+          "y_pct": 95.3,
+          "required": false
+        }
+      ]
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "check_formations_busy",
+      "slots": [
+        {
+          "x_pct": 92.6,
+          "y_pct": 51.0
+        },
+        {
+          "x_pct": 92.8,
+          "y_pct": 56.9
+        },
+        {
+          "x_pct": 92.6,
+          "y_pct": 62.5
+        },
+        {
+          "x_pct": 92.8,
+          "y_pct": 68.0
+        }
+      ],
+      "locked_template": "btn_fourth_formation_locked.png",
+      "note": "Exit early if all formation slots are occupied"
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_march.png",
+      "x_pct": 52.2,
+      "y_pct": 72.9,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_go_to_hq_view_universal.png",
+      "x_pct": 90.9,
+      "y_pct": 95.3,
+      "required": false
+    }
+  ]
+}
