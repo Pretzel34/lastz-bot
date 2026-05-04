@@ -2028,21 +2028,26 @@ class ActionExecutor:
         w, h = screenshot.size
 
         y_min = int(h * float(action.get("scan_y_min_pct", 8))  / 100)
-        y_max = int(h * float(action.get("scan_y_max_pct", 50)) / 100)
+        y_max = int(h * float(action.get("scan_y_max_pct", 85)) / 100)
         region = (0, y_min, w, y_max)
 
+        self._log(f"  [tap_active_alliance_mine] scanning region y={y_min}-{y_max} (screen {w}x{h})")
         ocr_results = self.vision.read_text(screenshot, region=region, min_confidence=0.3)
+
+        self._log(f"  [tap_active_alliance_mine] OCR found {len(ocr_results)} result(s):")
+        for r in sorted(ocr_results, key=lambda x: x.y):
+            self._log(f"    y={r.y:4d}  conf={r.confidence:.2f}  '{r.text}'")
 
         # Strict: parentheses around a coordinate pair, any separator
         # Loose: bare coordinate pair in case OCR drops the parens
-        # Separator can be comma, period, apostrophe, or space — OCR often misreads
-        strict = _re.compile(r'\(\s*\d+[,.\'\s]\d+\s*\)')
-        loose  = _re.compile(r'\b\d{2,4}[,.\'\s]\d{2,4}\b')
+        # Separator can be comma, period, apostrophe, space, or combination (e.g. ",." from OCR noise)
+        strict = _re.compile(r'\(\s*\d+[,.\'\s]+\d+\s*\)')
+        loose  = _re.compile(r'\b\d{2,4}[,.\'\s]+\d{2,4}\b')
 
         for pattern in (strict, loose):
             for r in sorted(ocr_results, key=lambda x: x.y):
                 if pattern.search(r.text):
-                    self._log(f"  [tap_active_alliance_mine] active mine '{r.text}' at ({r.x},{r.y})")
+                    self._log(f"  [tap_active_alliance_mine] matched '{r.text}' at ({r.x},{r.y})")
                     self.bot.tap(r.x, r.y)
                     return self._ok(action, f"tap_active_alliance_mine: tapped '{r.text}' at ({r.x},{r.y})")
 
