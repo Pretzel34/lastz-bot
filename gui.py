@@ -107,6 +107,12 @@ ALLIANCE_MINING_TASKS = [
     ("gather_alliance_building", "Gather Alliance Building", "gather_alliance_building"),
 ]
 
+BOUNTY_TASKS = [
+    ("enable_gold_bounty",   "Enable Gold Mission",   "enable_gold_bounty"),
+    ("enable_purple_bounty", "Enable Purple Mission", "enable_purple_bounty"),
+    ("enable_blue_bounty",   "Enable Blue Mission",   "enable_blue_bounty"),
+]
+
 # Rally task JSON files — (setting_key, label, json_filename)
 # setting_key must match the key in the "rally" settings block above
 RALLY_TASKS = [
@@ -186,6 +192,18 @@ TASK_CATEGORIES = [
         "settings": [
             {"key": "enabled",                   "label": "Enable Alliance Mining",   "type": "toggle", "default": True},
             {"key": "gather_alliance_building",  "label": "Gather Alliance Building", "type": "toggle", "default": True},
+        ]
+    },
+    {
+        "key":   "bounties",
+        "label": "Bounty Missions",
+        "icon":  "🎯",
+        "settings": [
+            {"key": "enabled",               "label": "Enable Bounty Tab",    "type": "toggle", "default": True},
+            {"key": "enable_gold_bounty",    "label": "Enable Gold Mission",  "type": "toggle", "default": True},
+            {"key": "enable_purple_bounty",  "label": "Enable Purple Mission","type": "toggle", "default": True},
+            {"key": "enable_blue_bounty",    "label": "Enable Blue Mission",  "type": "toggle", "default": True},
+            {"key": "help_allies_bounties",  "label": "Help Allies Bounties", "type": "toggle", "default": True},
         ]
     },
 ]
@@ -1609,7 +1627,7 @@ class BotApp(ctk.CTk):
             self.after(0, lambda: self._log(f"  ℹ arrange: {emu_type} running but no top-level window found yet", "info"))
             return
 
-        # Sort by PID for consistent top-to-bottom ordering on the left
+        # Sort by PID for consistent left-to-right ordering
         found.sort(key=lambda x: x[1])
         SW_RESTORE = 9
 
@@ -1622,27 +1640,24 @@ class BotApp(ctk.CTk):
             user32.GetWindowRect(hwnd, ctypes.byref(r))
             return r.right - r.left, r.bottom - r.top
 
-        # Stack MEmu windows top-to-bottom at (0, 0) without resizing
-        y_offset = 0
-        max_memu_w = 0
+        # Stack emulator windows left-to-right at y=0 without resizing
+        x_offset = 0
         for _, _, hwnd in found:
             user32.ShowWindow(hwnd, SW_RESTORE)
             w, h = get_size(hwnd)
-            user32.MoveWindow(hwnd, 0, y_offset, w, h, True)
-            y_offset += h
-            if w > max_memu_w:
-                max_memu_w = w
+            user32.MoveWindow(hwnd, x_offset, 0, w, h, True)
+            x_offset += w
 
-        # Move the bot GUI to the right of the MEmu stack
+        # Move the bot GUI to the right of all emulator windows
         bot_hwnd = user32.FindWindowW(None, "LAST Z BOT")
         if bot_hwnd:
             bw, bh = get_size(bot_hwnd)
             user32.ShowWindow(bot_hwnd, SW_RESTORE)
-            user32.MoveWindow(bot_hwnd, max_memu_w, 0, bw, bh, True)
+            user32.MoveWindow(bot_hwnd, x_offset, 0, bw, bh, True)
 
         n = len(found)
         self.after(0, lambda count=n, et=emu_type: self._log(
-            f"  📐 Arranged {count} {et} window(s) top-left, bot GUI to the right", "info"))
+            f"  📐 Arranged {count} {et} window(s) left-to-right, bot GUI to the right", "info"))
 
     def _start_farm(self, farm: dict, _semaphore=None):
         """Launch emulator, open Last Z, then start tasks — all in one click."""
@@ -1760,10 +1775,41 @@ class BotApp(ctk.CTk):
                     rec_name = f"{name}_{_datetime.now().strftime('%Y%m%d_%H%M%S')}"
                     engine.enable_recording(rec_name)
 
-                # Step 3 — run startup dismiss sequence before tasks
+                # Step 3a — check for in-game update dialog after post-launch wait
                 import json as _json
-                from pathlib import Path
+                import time as _time_upd
                 tasks_dir = get_resource_dir() / self.bot_settings.get("tasks_dir", "tasks")
+                _upd_file = tasks_dir / "update_detected.json"
+                if _upd_file.exists():
+                    try:
+                        with open(_upd_file) as _uf:
+                            _upd_data = _json.load(_uf)
+                        _upd_acts = (_upd_data.get("actions", [])
+                                     if isinstance(_upd_data, dict) else _upd_data)
+                        self.after(0, lambda: self._log("  ▶ Checking for update dialog...", "info"))
+                        _upd_found = True
+                        for _act in _upd_acts:
+                            if engine._stop_event.is_set():
+                                return
+                            _res = executor.execute(_act)
+                            if _res.status == ActionStatus.ABORT_TASK:
+                                _upd_found = False
+                                break
+                        if _upd_found and _upd_acts:
+                            self.after(0, lambda s=post_wait: self._log(
+                                f"  ⏱ Update handled — post-launch wait {s}s...", "info"))
+                            _time_upd.sleep(post_wait)
+                            if engine._stop_event.is_set():
+                                self.after(0, lambda: self._log(
+                                    f"■ {name}: stopped after update wait", "warn"))
+                                self.after(0, self._stop_timer)
+                                return
+                    except Exception as _e:
+                        self.after(0, lambda err=_e: self._log(
+                            f"  ⚠ Update check error: {err}", "warn"))
+
+                # Step 3 — run startup dismiss sequence before tasks
+                from pathlib import Path
                 startup_file = tasks_dir / "startup_dismiss.json"
                 if startup_file.exists():
                     try:
@@ -2176,6 +2222,48 @@ class BotApp(ctk.CTk):
                     self._log(f"  ⚠ {label} — tasks/{json_key}.json not found, skipping", "warn")
         else:
             self._log("  Alliance Mining disabled — skipping", "warn")
+
+        # ── Bounty tasks ──────────────────────────────────────────────────────
+        bounty_cfg = farm_tasks.get("bounties", {})
+        if bounty_cfg.get("enabled", True):
+            enter_file = tasks_dir / "enter_bounties.json"
+            if enter_file.exists():
+                try:
+                    with open(enter_file) as f:
+                        enter_data = _json.load(f)
+                    base_actions = [a for a in enter_data.get("actions", [])
+                                    if a.get("action") != "loop_task"]
+                    loop_actions = []
+                    for key, label, json_key in BOUNTY_TASKS:
+                        if bounty_cfg.get(key, True):
+                            loop_actions.append({
+                                "action": "loop_task",
+                                "task": f"{json_key}.json",
+                                "max_iterations": 10,
+                            })
+                        else:
+                            self._log(f"  ⏭ Skipping {label} (disabled)", "info")
+                    if loop_actions:
+                        if bounty_cfg.get("help_allies_bounties", True):
+                            loop_actions.append({
+                                "action": "loop_task",
+                                "task": "help_bounties.json",
+                                "max_iterations": 1,
+                            })
+                        hq_return = {"action": "tap_template_or_zone",
+                                     "template": "btn_go_to_hq_view_universal.png",
+                                     "x_pct": 90.9, "y_pct": 95.3, "required": False}
+                        all_actions = base_actions + loop_actions + [hq_return]
+                        tasks.append({"name": "Bounty Missions", "actions": all_actions})
+                        self._log(f"  ✓ Bounty Missions — {len(loop_actions)} color(s) enabled", "info")
+                    else:
+                        self._log("  Bounty Missions — no colors enabled, skipping", "warn")
+                except Exception as e:
+                    self._log(f"  ✗ Failed to load enter_bounties.json: {e}", "error")
+            else:
+                self._log("  ⚠ enter_bounties.json not found, skipping bounties", "warn")
+        else:
+            self._log("  Bounty Missions disabled — skipping", "warn")
 
         return tasks
 

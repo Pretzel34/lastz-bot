@@ -1,0 +1,30 @@
+{
+  "name": "help_bounties",
+  "actions": [
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 73.3,
+      "y_pct": 31.8,
+      "note": "Ally Missions"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "repeat_if_template",
+      "template": "btn_help_bounty.png",
+      "max_taps": 10,
+      "delay": 0.8,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    }
+  ]
+}

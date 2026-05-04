@@ -440,7 +440,10 @@ class BotEngine:
 
         self._log(f"▶▶ Task: {name} ({len(actions)} actions)")
 
-        for i, action in enumerate(actions):
+        i = 0
+        while i < len(actions):
+            action = actions[i]
+
             if self._stop_event.is_set():
                 return False
 
@@ -477,6 +480,12 @@ class BotEngine:
                 self.on_action_complete(action, bool(result))
             if self.on_stats_update:
                 self.on_stats_update(self.stats)
+
+            if result.skip_to is not None:
+                self._log(f"  ⏩ Skipping to step {result.skip_to + 1}")
+                i = result.skip_to
+            else:
+                i += 1
 
         self.stats.tasks_completed += 1
         self._log(f"✓ Task '{name}' complete")

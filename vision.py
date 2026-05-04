@@ -133,11 +133,14 @@ class VisionEngine:
         norm_screen, sx, sy = self._normalize_screenshot(screenshot)
         screen_cv = self._pil_to_cv(norm_screen)
 
-        # Crop to region if specified (scale region to canonical space)
+        # Crop to region if specified (scale region to canonical space, clamped to image bounds)
         offset_x, offset_y = 0, 0
         if region:
-            x1, y1, x2, y2 = (int(region[0]/sx), int(region[1]/sy),
-                               int(region[2]/sx), int(region[3]/sy))
+            img_h, img_w = screen_cv.shape[:2]
+            x1 = max(0, int(region[0]/sx))
+            y1 = max(0, int(region[1]/sy))
+            x2 = min(img_w, int(region[2]/sx))
+            y2 = min(img_h, int(region[3]/sy))
             screen_cv = screen_cv[y1:y2, x1:x2]
             offset_x, offset_y = x1, y1
 
@@ -175,6 +178,7 @@ class VisionEngine:
         template_path: str,
         threshold: Optional[float] = None,
         max_results: int = 20,
+        region: Optional[tuple] = None,
     ) -> list[MatchResult]:
         """
         Find ALL occurrences of a template on screen.
@@ -191,6 +195,16 @@ class VisionEngine:
         if template_cv is None:
             return []
 
+        offset_x, offset_y = 0, 0
+        if region:
+            img_h, img_w = screen_cv.shape[:2]
+            x1 = max(0, int(region[0]/sx))
+            y1 = max(0, int(region[1]/sy))
+            x2 = min(img_w, int(region[2]/sx))
+            y2 = min(img_h, int(region[3]/sy))
+            screen_cv = screen_cv[y1:y2, x1:x2]
+            offset_x, offset_y = x1, y1
+
         result = cv2.matchTemplate(screen_cv, template_cv, cv2.TM_CCOEFF_NORMED)
         th, tw = template_cv.shape[:2]
 
@@ -198,19 +212,19 @@ class VisionEngine:
         matches = []
 
         for pt in zip(*locations[::-1]):  # x, y pairs
-            cx = int((pt[0] + tw // 2) * sx)
-            cy = int((pt[1] + th // 2) * sy)
+            cx = int((pt[0] + tw // 2 + offset_x) * sx)
+            cy = int((pt[1] + th // 2 + offset_y) * sy)
             conf = result[pt[1], pt[0]]
             matches.append(MatchResult(
                 found=True,
                 x=cx, y=cy,
                 confidence=float(conf),
-                region=(int(pt[0]*sx), int(pt[1]*sy),
-                        int((pt[0]+tw)*sx), int((pt[1]+th)*sy)),
+                region=(int((pt[0]+offset_x)*sx), int((pt[1]+offset_y)*sy),
+                        int((pt[0]+tw+offset_x)*sx), int((pt[1]+th+offset_y)*sy)),
             ))
 
         # Non-maximum suppression — remove overlapping duplicates
-        matches = self._suppress_duplicates(matches, min_distance=tw // 2)
+        matches = self._suppress_duplicates(matches, min_distance=int(tw * sx // 2))
         matches.sort(key=lambda m: m.confidence, reverse=True)
         return matches[:max_results]
 

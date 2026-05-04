@@ -1,0 +1,90 @@
+{
+  "name": "enter_bounties",
+  "actions": [
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_template",
+      "template": "btn_bounty_entry_icon.png",
+      "fallback_template": "btn_bounty_entry_icon_alt.png",
+      "skip_task_if_not_found": true,
+      "log_skip": "bounty tab not found"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_check_bounty_claim.png",
+      "fallback_templates": [
+        "btn_check_bounty_claim_alt.png"
+      ],
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_post_bounty_claim_universal.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "loop_task",
+      "task": "enable_gold_bounty.json",
+      "max_iterations": 10
+    },
+    {
+      "action": "loop_task",
+      "task": "enable_purple_bounty.json",
+      "max_iterations": 10
+    },
+    {
+      "action": "loop_task",
+      "task": "enable_blue_bounty.json",
+      "max_iterations": 10
+    },
+    {
+      "action": "loop_task",
+      "task": "help_bounties.json",
+      "max_iterations": 1
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_post_bounty_claim_universal.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_back_out_of_page.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_go_to_hq_view_universal.png",
+      "x_pct": 90.9,
+      "y_pct": 95.3,
+      "required": false
+    }
+  ]
+}

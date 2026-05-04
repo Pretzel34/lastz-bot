@@ -31,7 +31,20 @@
     },
     {
       "action": "wait",
-      "seconds": 2.0
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_template",
+      "template": "btn_boomer_tab.png",
+      "fallback_template": "btn_boomer_tab_alt.png",
+      "timeout": 5,
+      "required": false,
+      "skip_to_on_found": 16,
+      "note": "Checking after scroll..."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
     },
     {
       "action": "scroll_left",
@@ -43,7 +56,20 @@
     },
     {
       "action": "wait",
-      "seconds": 2.0
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_template",
+      "template": "btn_boomer_tab.png",
+      "fallback_template": "btn_boomer_tab_alt.png",
+      "timeout": 5,
+      "required": false,
+      "skip_to_on_found": 16,
+      "note": "Checking after scroll..."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
     },
     {
       "action": "scroll_right",
@@ -55,7 +81,7 @@
     },
     {
       "action": "wait",
-      "seconds": 2.0
+      "seconds": 4.0
     },
     {
       "action": "tap_template_or_template",

@@ -122,6 +122,7 @@ class CaptureTool(ctk.CTk):
         self._vision_confidence = 0.8
         self._boomer_level = 5
         self._farm_settings: dict = {}
+        self._emulator_type = "MEmu"
         self._load_settings()
 
         self._build_ui()
@@ -135,6 +136,7 @@ class CaptureTool(ctk.CTk):
                 data = _json.load(f)
             bot_settings = data.get("bot_settings", {})
             self._vision_confidence = float(bot_settings.get("vision_confidence", 0.8))
+            self._emulator_type = bot_settings.get("emulator", "MEmu")
             # Use the first enabled farm's port and task settings as defaults
             for farm in data.get("farms", []):
                 if farm.get("enabled", False):
@@ -376,15 +378,29 @@ class CaptureTool(ctk.CTk):
         ctk.CTkFrame(right, height=1, fg_color=C["border"]).pack(
             fill="x", padx=12, pady=(0, 4))
 
-        ctk.CTkLabel(right, text="TEST OUTPUT",
+        test_header = ctk.CTkFrame(right, fg_color="transparent")
+        test_header.pack(fill="x", padx=12)
+
+        ctk.CTkLabel(test_header, text="TEST OUTPUT",
                      font=("Segoe UI Black", 10),
-                     text_color=C["accent"]).pack(anchor="w", padx=12)
+                     text_color=C["accent"]).pack(side="left")
+
+        ctk.CTkLabel(test_header, text="Emulator:", font=FS,
+                     text_color=C["text2"]).pack(side="left", padx=(16, 4))
+        self.emulator_combo = ctk.CTkComboBox(
+            test_header, values=["MEmu", "Nox", "LDPlayer"], width=90, font=FS,
+            fg_color=C["panel2"], border_color=C["border"], text_color=C["text"],
+            button_color=C["border"], dropdown_fg_color=C["panel2"],
+            command=lambda v: setattr(self, "_emulator_type", v),
+        )
+        self.emulator_combo.set(self._emulator_type)
+        self.emulator_combo.pack(side="left")
 
         log_bg = ctk.CTkFrame(right, fg_color=C["panel2"], corner_radius=6)
         log_bg.pack(fill="x", padx=12, pady=(4, 8))
 
         self.test_log = tk.Text(
-            log_bg, font=FSM, height=7,
+            log_bg, font=FSM, height=12,
             bg=C["panel2"], fg=C["text3"],
             relief="flat", bd=0, wrap="word",
             state="disabled", padx=6, pady=4
@@ -414,6 +430,18 @@ class CaptureTool(ctk.CTk):
         bot = ADBWrapper(port=port)
         if bot.connect():
             self.bot = bot
+            # Auto-detect emulator type from port range
+            try:
+                from launcher import EMULATOR_PROFILES
+                for emu, prof in EMULATOR_PROFILES.items():
+                    base = prof["port_base"]
+                    step = prof["port_step"]
+                    if (port - base) >= 0 and (port - base) % step == 0:
+                        self._emulator_type = emu
+                        self.after(0, lambda e=emu: self.emulator_combo.set(e))
+                        break
+            except Exception:
+                pass
             self._set_status(
                 f"● {bot.info.model}  {bot.info.screen_width}×{bot.info.screen_height}",
                 C["green"])
@@ -604,7 +632,7 @@ class CaptureTool(ctk.CTk):
         # Ask to add to sequence — use topmost dialog
         dialog2 = ctk.CTkToplevel(self)
         dialog2.title("Add to Sequence?")
-        dialog2.geometry("300x130")
+        dialog2.geometry("360x130")
         dialog2.configure(fg_color=C["panel"])
         dialog2.attributes("-topmost", True)
         dialog2.grab_set()
@@ -616,14 +644,20 @@ class CaptureTool(ctk.CTk):
         br2.pack()
         def yes2(r=result2, d=dialog2):
             r["ok"] = True; d.destroy()
-        ctk.CTkButton(br2, text="Yes", font=FB, width=90,
+        ctk.CTkButton(br2, text="Yes", font=FB, width=80,
                       fg_color=C["accent"], text_color=C["bg"],
                       hover_color=C["border"], corner_radius=4,
-                      command=yes2).pack(side="left", padx=6)
-        ctk.CTkButton(br2, text="No", font=FB, width=90,
+                      command=yes2).pack(side="left", padx=4)
+        ctk.CTkButton(br2, text="🔍 Detect", font=FB, width=90,
+                      fg_color=C["blue"], text_color=C["bg"],
+                      hover_color=C["border"], corner_radius=4,
+                      command=lambda n=name, d=dialog2: (
+                          d.destroy(), self._detect_template(n)
+                      )).pack(side="left", padx=4)
+        ctk.CTkButton(br2, text="No", font=FB, width=80,
                       fg_color=C["card"], text_color=C["text"],
                       hover_color=C["border"], corner_radius=4,
-                      command=dialog2.destroy).pack(side="left", padx=6)
+                      command=dialog2.destroy).pack(side="left", padx=4)
         dialog2.wait_window()
         if result2["ok"]:
             self._add_template_action(name)
@@ -753,10 +787,49 @@ class CaptureTool(ctk.CTk):
                           command=lambda p=path: self._delete_template(p)
                           ).pack(side="right", padx=4)
 
+            # Detect button
+            ctk.CTkButton(row, text="🔍", width=22, height=22,
+                          font=FSM, fg_color="transparent",
+                          text_color=C["text3"], hover_color=C["blue"],
+                          command=lambda n=path.name: self._detect_template(n)
+                          ).pack(side="right", padx=0)
+
     def _delete_template(self, path: Path):
         if messagebox.askyesno("Delete", f"Delete '{path.name}'?"):
             path.unlink()
             self._refresh_template_list()
+
+    def _detect_template(self, name: str):
+        """Take a fresh screenshot and check whether name is visible, logging confidence."""
+        if not self.bot:
+            self._tlog("Not connected — can't detect", "fail")
+            return
+        if not EXECUTOR_AVAILABLE:
+            self._tlog("VisionEngine not available", "fail")
+            return
+
+        def _do():
+            try:
+                screenshot = self.bot.screenshot()
+                self.screenshot = screenshot
+                self.after(0, self._display_screenshot)
+                path = self.template_dir / name
+                if not path.exists():
+                    self.after(0, lambda: self._tlog(f"Template file not found: {name}", "fail"))
+                    return
+                vision = VisionEngine(confidence_threshold=self._vision_confidence)
+                match = vision.find_template(screenshot, path)
+                if match:
+                    conf = getattr(match, "confidence", 0)
+                    self.after(0, lambda: self._tlog(
+                        f"✓ FOUND '{name}'  conf={conf:.3f}  at ({match.x}, {match.y})", "ok"))
+                else:
+                    self.after(0, lambda: self._tlog(
+                        f"✗ NOT FOUND '{name}'  (threshold={self._vision_confidence:.2f})", "fail"))
+            except Exception as e:
+                self.after(0, lambda err=e: self._tlog(f"Detect error: {err}", "fail"))
+
+        threading.Thread(target=_do, daemon=True).start()
 
     # ══════════════════════════════════════════════════════════════════════
     # Action Builders
@@ -1006,14 +1079,14 @@ class CaptureTool(ctk.CTk):
         self._tlog("+ Added: ensure_hq_view", "ok")
 
     def _add_zoom_out(self):
-        """Add zoom_out — uses Ctrl+scroll to zoom out in Last Z."""
+        """Add zoom_out — presses F3 x3 to zoom out in Last Z."""
         self.recorded_actions.append({
             "action": "zoom_out",
             "steps":  3,
-            "note":   "Ctrl+scroll up x3 to zoom out"
+            "note":   "F3 x3 to zoom out"
         })
         self._refresh_sequence()
-        self._tlog("+ Added: zoom_out (Ctrl+scroll x3)", "ok")
+        self._tlog("+ Added: zoom_out (F3 x3)", "ok")
 
     def _add_scroll(self):
         """Add a scroll action with direction picker."""
@@ -1411,7 +1484,7 @@ class CaptureTool(ctk.CTk):
             return f"scroll {d}  steps={action.get('steps',1)}  dist={action.get('distance_pct',40)}%"
         elif atype == "zoom_out":
             s = action.get("steps", 3)
-            return f"zoom_out: Ctrl+scroll x{s}"
+            return f"zoom_out: F3 x{s}"
         elif atype == "tap":
             return f"tap_zone: {action.get('x')}px, {action.get('y')}px  [fixed coords]"
         elif atype == "wait":
@@ -1640,6 +1713,7 @@ class CaptureTool(ctk.CTk):
             live_settings.setdefault("rally", {})
             live_settings["rally"] = dict(live_settings["rally"])
             live_settings["rally"]["boomer_level"] = boomer_lvl
+            tlog_and_save(f"emulator_type={self._emulator_type}  port={getattr(self.bot, 'port', '?')}", "info")
             executor = ActionExecutor(
                 bot=self.bot,
                 vision=vision,
@@ -1647,6 +1721,7 @@ class CaptureTool(ctk.CTk):
                 log_callback=lambda msg: tlog_and_save(msg, "info"),
                 stop_event=stop_event,
                 farm_settings=live_settings,
+                emulator_type=self._emulator_type,
             )
 
             actions = self.recorded_actions
@@ -1663,7 +1738,10 @@ class CaptureTool(ctk.CTk):
             else:
                 self.recorder = None
 
-            for i, action in enumerate(actions):
+            i = 0
+            while i < len(actions):
+                action = actions[i]
+
                 if not self._running_test:
                     tlog_and_save("Stopped.", "warn")
                     break
@@ -1698,6 +1776,12 @@ class CaptureTool(ctk.CTk):
                 if result.status == ActionStatus.ABORT_TASK:
                     tlog_and_save(f"  ⏭ Task aborted — stopping test run", "warn")
                     break
+
+                if result.skip_to is not None:
+                    tlog_and_save(f"  ⏩ Skipping to step {result.skip_to + 1}", "info")
+                    i = result.skip_to
+                else:
+                    i += 1
 
             if self.recorder:
                 tlog_and_save(f"Frames saved → {self.recorder.out_dir}", "ok")

@@ -1,0 +1,62 @@
+{
+  "name": "enable_gold_bounty",
+  "actions": [
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_badge_gold.png",
+      "fallback_templates": [
+        "btn_badge_gold_alt.png"
+      ],
+      "tap_offset_y": 185,
+      "scan_y_min_pct": 31,
+      "scan_y_max_pct": 60,
+      "verify_template": "btn_bounty_go.png",
+      "verify_offset_x": -80,
+      "verify_offset_y": 185,
+      "verify_margin_x": 120,
+      "verify_margin_y": 35,
+      "skip_task_if_not_found": true,
+      "log_success": "Found gold bounty \u2014 tapping GO"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_quick_deploy.png",
+      "skip_task_if_not_found": true,
+      "log_success": "Quick deploy tapped"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_dispatch.png",
+      "x_pct": 68.0,
+      "y_pct": 95.3,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_template",
+      "template": "btn_bounty_entry_icon.png",
+      "fallback_template": "btn_bounty_entry_icon_alt.png",
+      "skip_task_if_not_found": true,
+      "log_skip": "bounty tab not found"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    }
+  ]
+}

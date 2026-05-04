@@ -1,0 +1,43 @@
+{
+  "name": "update_detected",
+  "actions": [
+    {
+      "action": "if_template_found",
+      "template": "btn_update_detected.png",
+      "skip_task_if_not_found": true,
+      "log_found": "Update dialog detected \u00e2\u20ac\u201d running update sequence",
+      "log_skip": "No update dialog \u00e2\u20ac\u201d continuing normally"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_to_store_for_update.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_update_button.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 20.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_back_to_game.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    }
+  ]
+}

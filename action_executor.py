@@ -39,6 +39,7 @@ class ActionResult:
     message: str = ""
     duration_ms: int = 0
     match: Optional[MatchResult] = None
+    skip_to: Optional[int] = None  # 0-indexed action index to jump to next
 
     def __bool__(self):
         return self.status == ActionStatus.SUCCESS
@@ -218,6 +219,7 @@ class ActionExecutor:
             "compare_resources":        self._compare_resources,
             "read_resource_priority":   self._read_resource_priority,
             "loop_until_template":      self._loop_until_template,
+            "loop_task":                self._loop_task,
         }
 
         handler = handlers.get(action_type)
@@ -854,6 +856,16 @@ class ActionExecutor:
         threshold = float(action.get("threshold")) if action.get("threshold") is not None else None
         screenshot = self.bot.screenshot()
 
+        # Optional scan region — pass as region to find_template (avoids normalization distortion)
+        _w, _h = screenshot.size
+        _x_off = int(_w * float(action.get("scan_x_min_pct", 0))   / 100)
+        _y_off = int(_h * float(action.get("scan_y_min_pct", 0))   / 100)
+        _x_end = int(_w * float(action.get("scan_x_max_pct", 100)) / 100)
+        _y_end = int(_h * float(action.get("scan_y_max_pct", 100)) / 100)
+        scan_region = ((_x_off, _y_off, _x_end, _y_end)
+                       if (_x_off or _y_off or _x_end != _w or _y_end != _h)
+                       else None)
+
         # Build list of templates to try: primary + optional fallbacks
         templates_to_try = [template]
         fallback = action.get("fallback_template")
@@ -861,21 +873,62 @@ class ActionExecutor:
             templates_to_try.append(fallback)
         templates_to_try.extend(action.get("fallback_templates", []))
 
+        # Optional secondary verification: when set, find ALL badge matches and pick the
+        # first one where verify_template is visible at the specified offset (e.g. GO button).
+        # This skips in-progress badges that show a timer instead of GO.
+        verify_template = action.get("verify_template")
+        verify_offset_x = int(action.get("verify_offset_x", 0))
+        verify_offset_y = int(action.get("verify_offset_y", 0))
+        verify_margin_x = int(action.get("verify_margin_x", 60))
+        verify_margin_y = int(action.get("verify_margin_y", 25))
+        verify_threshold = float(action.get("verify_threshold")) if action.get("verify_threshold") else None
+
+        used_threshold = threshold if threshold is not None else self.vision.confidence_threshold
+
         match = None
         matched_template = None
-        for tmpl in templates_to_try:
-            path = self._template_path(tmpl)
-            match = self.vision.find_template(screenshot, path, threshold=threshold)
-            if self.log_callback:
-                conf = getattr(match, "confidence", 0) if match else 0
-                used_threshold = threshold if threshold is not None else self.vision.confidence_threshold
-                self.log_callback(f"  [if_template_tap] '{tmpl}' conf={conf:.3f} threshold={used_threshold:.3f} found={bool(match)}")
-            if match:
-                matched_template = tmpl
-                break
+
+        if verify_template:
+            verify_path = self._template_path(verify_template)
+            for tmpl in templates_to_try:
+                path = self._template_path(tmpl)
+                candidates = self.vision.find_all_templates(screenshot, path, threshold=threshold, region=scan_region)
+                if self.log_callback:
+                    self.log_callback(f"  [if_template_tap] '{tmpl}' found {len(candidates)} candidate(s)")
+                for candidate in candidates:
+                    vx = candidate.x + verify_offset_x
+                    vy = candidate.y + verify_offset_y
+                    verify_region = (vx - verify_margin_x, vy - verify_margin_y,
+                                     vx + verify_margin_x, vy + verify_margin_y)
+                    vm = self.vision.find_template(screenshot, verify_path,
+                                                   threshold=verify_threshold, region=verify_region)
+                    vconf = getattr(vm, "confidence", 0) if vm else 0
+                    if self.log_callback:
+                        self.log_callback(
+                            f"  [verify] '{verify_template}' at ({vx},{vy}) "
+                            f"conf={vconf:.3f} found={bool(vm)}"
+                        )
+                    if vm:
+                        match = candidate
+                        matched_template = tmpl
+                        break
+                if match:
+                    break
+        else:
+            for tmpl in templates_to_try:
+                path = self._template_path(tmpl)
+                match = self.vision.find_template(screenshot, path, threshold=threshold, region=scan_region)
+                if self.log_callback:
+                    conf = getattr(match, "confidence", 0) if match else 0
+                    self.log_callback(f"  [if_template_tap] '{tmpl}' conf={conf:.3f} threshold={used_threshold:.3f} found={bool(match)}")
+                if match:
+                    matched_template = tmpl
+                    break
 
         if match:
-            self.bot.tap(match.x, match.y)
+            tap_x = match.x + int(action.get("tap_offset_x", 0))
+            tap_y = match.y + int(action.get("tap_offset_y", 0))
+            self.bot.tap(tap_x, tap_y)
             msg = action.get("log_success", f"Found and tapped '{matched_template}'")
             if self.log_callback:
                 self.log_callback(f"  ✓ {msg}")
@@ -966,6 +1019,8 @@ class ActionExecutor:
         path = self._template_path(template)
         match = self.vision.find_template(screenshot, path)
 
+        skip_task_if_not_found = action.get("skip_task_if_not_found", False)
+
         if match:
             msg = action.get("log_found", f"'{template}' detected")
             if self.log_callback:
@@ -974,11 +1029,15 @@ class ActionExecutor:
                 if self._stop_event and self._stop_event.is_set():
                     break
                 self.execute(sub)
+            if skip_task_if_not_found:
+                return self._ok(action, msg)
             return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
 
         skip_msg = action.get("log_skip", f"'{template}' not visible — continuing")
         if self.log_callback:
             self.log_callback(f"  ⏭ {skip_msg}")
+        if skip_task_if_not_found:
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=skip_msg)
         return ActionResult(status=ActionStatus.SKIPPED, action=action, message=skip_msg)
 
     # ------------------------------------------------------------------
@@ -1287,6 +1346,64 @@ class ActionExecutor:
 
         return self._ok(action, f"loop_until_template: reached max_iterations ({max_iter}) without finding done template")
 
+    def _loop_task(self, action: dict) -> ActionResult:
+        """
+        Repeatedly run a sub-task JSON until it returns ABORT_TASK (e.g. badge not found).
+        Use this to keep processing bounties/items until none remain.
+
+        Required:
+          task            - filename inside the tasks directory (e.g. "enable_purple_bounty.json")
+
+        Optional:
+          max_iterations  - safety cap (default: 20)
+
+        The sub-task should use skip_task_if_not_found on its first detection step so it
+        returns ABORT_TASK when there's nothing left to process, ending the loop cleanly.
+        """
+        import json as _json
+        task_name = action.get("task")
+        if not task_name:
+            return self._fail(action, "loop_task requires 'task'")
+        max_iter = int(action.get("max_iterations", 20))
+
+        task_path = get_resource_dir() / "tasks" / task_name
+        if not task_path.exists():
+            return self._fail(action, f"loop_task: task file not found: {task_name}")
+
+        try:
+            task_data = _json.loads(task_path.read_text(encoding="utf-8"))
+            task_actions = task_data.get("actions", task_data) if isinstance(task_data, dict) else task_data
+        except Exception as e:
+            return self._fail(action, f"loop_task: failed to load {task_name}: {e}")
+
+        completed = 0
+        for i in range(max_iter):
+            if self._stop_event and self._stop_event.is_set():
+                break
+            if self.log_callback:
+                self.log_callback(f"  [loop_task] '{task_name}' — attempt {i + 1}/{max_iter}")
+
+            aborted = False
+            for sub_action in task_actions:
+                if self._stop_event and self._stop_event.is_set():
+                    return self._ok(action, f"loop_task: stopped at attempt {i + 1}")
+                result = self.execute(sub_action)
+                if result.status == ActionStatus.ABORT_TASK:
+                    aborted = True
+                    break
+
+            if aborted:
+                if self.log_callback:
+                    self.log_callback(
+                        f"  [loop_task] '{task_name}' — nothing found, loop done ({completed} completed)")
+                break
+            completed += 1
+
+        if completed >= max_iter and self.log_callback:
+            self.log_callback(f"  [loop_task] reached max {max_iter} iterations for '{task_name}'")
+
+        return self._ok(action, f"loop_task: '{task_name}' done — {completed} completed")
+
     def _tap_if_slots_available(self, action: dict) -> ActionResult:
         """
         Like if_template_tap, but first reads the formation counter (e.g. "3/3")
@@ -1585,12 +1702,15 @@ class ActionExecutor:
         distance_y_pct = float(action.get("distance_y_pct", action.get("distance_pct", 40)))
         duration_ms    = int(action.get("duration_ms", 500))
         wait_secs      = float(action.get("wait_seconds", 1.5))
+        ignore_top_pct = float(action.get("ignore_top_pct", 0))
 
         path = self._template_path(template)
 
         def _check():
-            ss = self.bot.screenshot()
-            m  = self.vision.find_template(ss, path, threshold=threshold)
+            ss   = self.bot.screenshot()
+            w, h = ss.size
+            region = (0, int(h * ignore_top_pct / 100), w, h) if ignore_top_pct > 0 else None
+            m = self.vision.find_template(ss, path, threshold=threshold, region=region)
             self._log(f"  [tap_template_search] '{template}' found={bool(m)}")
             return m
 
@@ -1616,7 +1736,7 @@ class ActionExecutor:
             self.bot.tap(match.x, match.y)
             return self._ok(action, f"tap_template_search: '{template}' found (no scroll)")
 
-        for direction in ("left", "up", "right", "down"):
+        for direction in ("left", "left", "up", "right", "right", "right", "right", "down", "left", "left", "left"):
             self._log(f"  [tap_template_search] not found — scrolling {direction}")
             _scroll(direction)
             match = _check()
@@ -1653,10 +1773,15 @@ class ActionExecutor:
         tmatch = self.vision.find_template(screenshot, path, threshold=threshold)
         conf   = getattr(tmatch, "confidence", 0) if tmatch else 0
         self._log(f"  [tap_template_or_template] '{template}' conf={conf:.3f} found={bool(tmatch)}")
+        skip_to_step = action.get("skip_to_on_found")
+        skip_to_idx  = (int(skip_to_step) - 1) if skip_to_step is not None else None
+
         if tmatch:
             self._log(f"  [tap_template_or_template] tapping at ({tmatch.x}, {tmatch.y})")
             self.bot.tap(tmatch.x, tmatch.y)
-            return self._ok(action, f"Tapped primary template '{template}' at ({tmatch.x}, {tmatch.y})")
+            result = self._ok(action, f"Tapped primary template '{template}' at ({tmatch.x}, {tmatch.y})")
+            result.skip_to = skip_to_idx
+            return result
 
         # ── Try fallback ─────────────────────────────────────────────────
         fb_path  = self._template_path(fallback_template)
@@ -1666,8 +1791,10 @@ class ActionExecutor:
         if fb_match:
             self._log(f"  [tap_template_or_template] tapping fallback at ({fb_match.x}, {fb_match.y})")
             self.bot.tap(fb_match.x, fb_match.y)
-            return self._ok(action,
+            result = self._ok(action,
                 f"Primary '{template}' not found — tapped fallback '{fallback_template}' at ({fb_match.x}, {fb_match.y})")
+            result.skip_to = skip_to_idx
+            return result
 
         # ── Neither found ────────────────────────────────────────────────
         skip_msg = action.get("log_skip", f"Neither '{template}' nor '{fallback_template}' found — skipping")
