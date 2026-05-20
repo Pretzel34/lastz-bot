@@ -63,7 +63,7 @@
     },
     {
       "action": "if_template_tap",
-      "template": "btn_post_bounty_claim_universal.png",
+      "template": "btn_back_out_of_page.png",
       "required": false
     },
     {
@@ -72,7 +72,7 @@
     },
     {
       "action": "if_template_tap",
-      "template": "btn_back_out_of_page.png",
+      "template": "btn_cross_state_bounty_exit.png",
       "required": false
     },
     {

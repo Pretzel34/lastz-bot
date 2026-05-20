@@ -66,7 +66,7 @@
       "plus_template": "btn_plus_boomer.png",
       "minus_template": "btn_subtract_boomer_lvl.png",
       "min_level": 1,
-      "max_level": 47,
+      "max_level": 60,
       "max_attempts": 50,
       "tap_delay": 3.0,
       "required": false,
@@ -102,9 +102,14 @@
       "fallback_template": "btn_march_on_boomer_alt.png",
       "fuel_template": "btn_out_of_fuel.png",
       "required": false,
-      "exhaust_rallies_if_not_found": true,
-      "log_skip": "March not available — troops are busy, skipping rally attempt",
-      "note": "If out of fuel, restore_fuel runs automatically and retries. If march still absent, troops are busy — abort."
+      "log_skip": "Troops busy — march not available, skipping rally attempt",
+      "on_not_found": [
+        { "action": "if_template_tap", "template": "btn_back_out_of_page.png", "required": false },
+        { "action": "wait", "seconds": 2.0 },
+        { "action": "if_template_tap", "template": "btn_back_out_of_page.png", "required": false },
+        { "action": "wait", "seconds": 2.0 }
+      ],
+      "note": "If out of fuel, restore_fuel runs automatically and retries. If march still absent, troops are busy — close panel and abort."
     },
     {
       "action": "rally_count_record",

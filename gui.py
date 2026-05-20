@@ -642,7 +642,8 @@ class BotApp(ctk.CTk):
 
         if hovered:
             # Live-reorder: repack frames to preview where the item would land
-            order = list(self.bot_settings.get(
+            farm = self.farms[self._active_farm_idx]
+            order = list(farm.get(
                 "task_cat_order", [c["key"] for c in TASK_CATEGORIES]))
             for c in TASK_CATEGORIES:
                 if c["key"] not in order:
@@ -679,7 +680,8 @@ class BotApp(ctk.CTk):
                 pass
 
         if target_key:
-            order = list(self.bot_settings.get(
+            farm = self.farms[farm_idx]
+            order = list(farm.get(
                 "task_cat_order", [c["key"] for c in TASK_CATEGORIES]))
             for c in TASK_CATEGORIES:
                 if c["key"] not in order:
@@ -688,13 +690,13 @@ class BotApp(ctk.CTk):
                 src_i = order.index(self._cat_drag_key)
                 tgt_i = order.index(target_key)
                 order.insert(tgt_i, order.pop(src_i))
-                self.bot_settings["task_cat_order"] = order
+                farm["task_cat_order"] = order
                 self._save_data()
                 # Full rebuild to clean up any pack order artifacts
                 self._show_farm_detail(farm_idx)
         else:
             # Dropped on nothing — restore original visual order
-            order = list(self.bot_settings.get(
+            order = list(self.farms[farm_idx].get(
                 "task_cat_order", [c["key"] for c in TASK_CATEGORIES]))
             for key in order:
                 if key in self._cat_frames:
@@ -1133,8 +1135,8 @@ class BotApp(ctk.CTk):
         self._farm_widget_refs = {}
         self._cat_frames = {}
 
-        order = self.bot_settings.get("task_cat_order",
-                                       [c["key"] for c in TASK_CATEGORIES])
+        order = farm.get("task_cat_order",
+                          [c["key"] for c in TASK_CATEGORIES])
         cat_map = {c["key"]: c for c in TASK_CATEGORIES}
         ordered_cats = [cat_map[k] for k in order if k in cat_map]
         # Append any categories not yet in the saved order
@@ -2057,20 +2059,21 @@ class BotApp(ctk.CTk):
 
     def _farm_to_tasks(self, farm: dict) -> list:
         """
-        Load each enabled daily task JSON from tasks/ directory.
-        Uses DAILY_TASKS list — each entry maps to a tasks/<key>.json file.
+        Build the ordered task list for a farm, respecting the per-farm
+        category order set via drag-and-drop in the farm settings UI.
         """
         import json as _json
         from pathlib import Path
 
-        tasks_dir = get_resource_dir() / self.bot_settings.get("tasks_dir", "tasks")
-        tasks     = []
+        tasks_dir  = get_resource_dir() / self.bot_settings.get("tasks_dir", "tasks")
+        tasks      = []
         farm_tasks = farm.get("tasks", {})
-        daily_cfg  = farm_tasks.get("daily_tasks", {})
 
-        if not daily_cfg.get("enabled", True):
-            self._log("  Daily Tasks disabled — skipping all", "warn")
-        else:
+        def _add_daily():
+            daily_cfg = farm_tasks.get("daily_tasks", {})
+            if not daily_cfg.get("enabled", True):
+                self._log("  Daily Tasks disabled — skipping all", "warn")
+                return
             for key, label, default_on in DAILY_TASKS:
                 if not daily_cfg.get(key, default_on):
                     self._log(f"  ⏭ Skipping {label} (disabled)", "info")
@@ -2088,9 +2091,11 @@ class BotApp(ctk.CTk):
                 else:
                     self._log(f"  ⚠ {label} — tasks/{key}.json not found, skipping", "warn")
 
-        # ── Rally tasks ───────────────────────────────────────────────
-        rally_cfg = farm_tasks.get("rally", {})
-        if rally_cfg.get("enabled", True):
+        def _add_rally():
+            rally_cfg = farm_tasks.get("rally", {})
+            if not rally_cfg.get("enabled", True):
+                self._log("  Rally disabled — skipping all rally tasks", "warn")
+                return
             for key, label, json_key in RALLY_TASKS:
                 if not rally_cfg.get(key, True):
                     self._log(f"  ⏭ Skipping {label} (disabled)", "info")
@@ -2101,8 +2106,6 @@ class BotApp(ctk.CTk):
                         with open(json_file) as f:
                             data = _json.load(f)
                         actions = data.get("actions", data) if isinstance(data, dict) else data
-                        # Repeat create_rally up to max_rallies_per_day times;
-                        # rally_count_check inside the JSON aborts each run once the limit is hit
                         repeat = int(rally_cfg.get("max_rallies_per_day", 1)) if key == "create_rally" else 1
                         for i in range(repeat):
                             tasks.append({"name": f"{label} ({i + 1}/{repeat})", "actions": actions})
@@ -2111,23 +2114,19 @@ class BotApp(ctk.CTk):
                         self._log(f"  ✗ Failed to load {json_file.name}: {e}", "error")
                 else:
                     self._log(f"  ⚠ {label} — tasks/{json_key}.json not found, skipping", "warn")
-        else:
-            self._log("  Rally disabled — skipping all rally tasks", "warn")
 
-        # ── Gathering tasks ───────────────────────────────────────────
-        gather_cfg = farm_tasks.get("gathering", {})
-        if gather_cfg.get("enabled", False):
+        def _add_gathering():
+            gather_cfg = farm_tasks.get("gathering", {})
+            if not gather_cfg.get("enabled", False):
+                self._log("  Gathering disabled — skipping all gathering tasks", "warn")
+                return
             max_formations = int(gather_cfg.get("max_formations", 3))
-
-            # Map priority resource names to GATHER_TASKS setting keys
             _priority_map = {
                 "wood":        "collect_wood",
                 "food":        "collect_food",
                 "electricity": "collect_electricity",
                 "zent":        "collect_zents",
             }
-
-            # Load saved priority order; fall back to GATHER_TASKS order if missing
             priority_order = []
             priority_file = Path("logs/resource_priority.json")
             if priority_file.exists():
@@ -2142,9 +2141,8 @@ class BotApp(ctk.CTk):
                 for rank, resource in enumerate(priority_order):
                     if _priority_map.get(resource) == task_key:
                         return rank
-                return len(priority_order)  # unknown resources go last
+                return len(priority_order)
 
-            # Build pool of enabled tasks with their loaded actions, sorted by priority
             gather_pool = []
             for key, label, json_key, default_on in GATHER_TASKS:
                 if not gather_cfg.get(key, default_on):
@@ -2165,23 +2163,19 @@ class BotApp(ctk.CTk):
 
             if gather_pool:
                 gather_pool.sort(key=_priority_rank)
-                priority_names = [label for _, label, _ in gather_pool]
-                self._log(f"  ↑ Gather priority: {' > '.join(priority_names)}", "info")
-
-                # Cycle through pool in priority order until max_formations runs are queued
+                self._log(f"  ↑ Gather priority: {' > '.join(l for _, l, _ in gather_pool)}", "info")
                 for i in range(max_formations):
                     key, label, actions = gather_pool[i % len(gather_pool)]
-                    run_num = i + 1
-                    tasks.append({"name": f"{label} ({run_num}/{max_formations})",
+                    tasks.append({"name": f"{label} ({i + 1}/{max_formations})",
                                   "actions": actions,
                                   "farm_settings": {"gathering": gather_cfg}})
                 self._log(f"  ✓ Queued {max_formations} gather run(s)", "info")
-        else:
-            self._log("  Gathering disabled — skipping all gathering tasks", "warn")
 
-        # ── Alliance tasks ────────────────────────────────────────────
-        alliance_cfg = farm_tasks.get("alliance", {})
-        if alliance_cfg.get("enabled", True):
+        def _add_alliance():
+            alliance_cfg = farm_tasks.get("alliance", {})
+            if not alliance_cfg.get("enabled", True):
+                self._log("  Alliance disabled — skipping all alliance tasks", "warn")
+                return
             for key, label, json_key in ALLIANCE_TASKS:
                 if not alliance_cfg.get(key, True):
                     self._log(f"  ⏭ Skipping {label} (disabled)", "info")
@@ -2198,12 +2192,12 @@ class BotApp(ctk.CTk):
                         self._log(f"  ✗ Failed to load {json_file.name}: {e}", "error")
                 else:
                     self._log(f"  ⚠ {label} — tasks/{json_key}.json not found, skipping", "warn")
-        else:
-            self._log("  Alliance disabled — skipping all alliance tasks", "warn")
 
-        # ── Alliance Mining tasks ─────────────────────────────────────
-        alliance_mining_cfg = farm_tasks.get("alliance_mining", {})
-        if alliance_mining_cfg.get("enabled", True):
+        def _add_alliance_mining():
+            alliance_mining_cfg = farm_tasks.get("alliance_mining", {})
+            if not alliance_mining_cfg.get("enabled", True):
+                self._log("  Alliance Mining disabled — skipping", "warn")
+                return
             for key, label, json_key in ALLIANCE_MINING_TASKS:
                 if not alliance_mining_cfg.get(key, True):
                     self._log(f"  ⏭ Skipping {label} (disabled)", "info")
@@ -2220,50 +2214,62 @@ class BotApp(ctk.CTk):
                         self._log(f"  ✗ Failed to load {json_file.name}: {e}", "error")
                 else:
                     self._log(f"  ⚠ {label} — tasks/{json_key}.json not found, skipping", "warn")
-        else:
-            self._log("  Alliance Mining disabled — skipping", "warn")
 
-        # ── Bounty tasks ──────────────────────────────────────────────────────
-        bounty_cfg = farm_tasks.get("bounties", {})
-        if bounty_cfg.get("enabled", True):
+        def _add_bounties():
+            bounty_cfg = farm_tasks.get("bounties", {})
+            if not bounty_cfg.get("enabled", True):
+                self._log("  Bounty Missions disabled — skipping", "warn")
+                return
             enter_file = tasks_dir / "enter_bounties.json"
-            if enter_file.exists():
-                try:
-                    with open(enter_file) as f:
-                        enter_data = _json.load(f)
-                    base_actions = [a for a in enter_data.get("actions", [])
-                                    if a.get("action") != "loop_task"]
-                    loop_actions = []
-                    for key, label, json_key in BOUNTY_TASKS:
-                        if bounty_cfg.get(key, True):
-                            loop_actions.append({
-                                "action": "loop_task",
-                                "task": f"{json_key}.json",
-                                "max_iterations": 10,
-                            })
-                        else:
-                            self._log(f"  ⏭ Skipping {label} (disabled)", "info")
-                    if loop_actions:
-                        if bounty_cfg.get("help_allies_bounties", True):
-                            loop_actions.append({
-                                "action": "loop_task",
-                                "task": "help_bounties.json",
-                                "max_iterations": 1,
-                            })
-                        hq_return = {"action": "tap_template_or_zone",
-                                     "template": "btn_go_to_hq_view_universal.png",
-                                     "x_pct": 90.9, "y_pct": 95.3, "required": False}
-                        all_actions = base_actions + loop_actions + [hq_return]
-                        tasks.append({"name": "Bounty Missions", "actions": all_actions})
-                        self._log(f"  ✓ Bounty Missions — {len(loop_actions)} color(s) enabled", "info")
-                    else:
-                        self._log("  Bounty Missions — no colors enabled, skipping", "warn")
-                except Exception as e:
-                    self._log(f"  ✗ Failed to load enter_bounties.json: {e}", "error")
-            else:
+            if not enter_file.exists():
                 self._log("  ⚠ enter_bounties.json not found, skipping bounties", "warn")
-        else:
-            self._log("  Bounty Missions disabled — skipping", "warn")
+                return
+            try:
+                with open(enter_file) as f:
+                    enter_data = _json.load(f)
+                base_actions = [a for a in enter_data.get("actions", [])
+                                if a.get("action") != "loop_task"]
+                loop_actions = []
+                for key, label, json_key in BOUNTY_TASKS:
+                    if bounty_cfg.get(key, True):
+                        loop_actions.append({
+                            "action": "loop_task",
+                            "task": f"{json_key}.json",
+                            "max_iterations": 10,
+                        })
+                    else:
+                        self._log(f"  ⏭ Skipping {label} (disabled)", "info")
+                if loop_actions:
+                    if bounty_cfg.get("help_allies_bounties", True):
+                        loop_actions.append({
+                            "action": "loop_task",
+                            "task": "help_bounties.json",
+                            "max_iterations": 1,
+                        })
+                    hq_return = {"action": "tap_template_or_zone",
+                                 "template": "btn_go_to_hq_view_universal.png",
+                                 "x_pct": 90.9, "y_pct": 95.3, "required": False}
+                    tasks.append({"name": "Bounty Missions",
+                                  "actions": base_actions + loop_actions + [hq_return]})
+                    self._log(f"  ✓ Bounty Missions — {len(loop_actions)} color(s) enabled", "info")
+                else:
+                    self._log("  Bounty Missions — no colors enabled, skipping", "warn")
+            except Exception as e:
+                self._log(f"  ✗ Failed to load enter_bounties.json: {e}", "error")
+
+        _builders = {
+            "daily_tasks":     _add_daily,
+            "rally":           _add_rally,
+            "gathering":       _add_gathering,
+            "alliance":        _add_alliance,
+            "alliance_mining": _add_alliance_mining,
+            "bounties":        _add_bounties,
+        }
+
+        default_order = [c["key"] for c in TASK_CATEGORIES]
+        for cat_key in farm.get("task_cat_order", default_order):
+            if cat_key in _builders:
+                _builders[cat_key]()
 
         return tasks
 

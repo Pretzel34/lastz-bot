@@ -441,6 +441,7 @@ class BotEngine:
         self._log(f"▶▶ Task: {name} ({len(actions)} actions)")
 
         i = 0
+        task_restarts = 0
         while i < len(actions):
             action = actions[i]
 
@@ -453,6 +454,15 @@ class BotEngine:
             self.current_action_index = i
             result = self._run_action_with_retry(action)
             self.stats.actions_run += 1
+
+            if result.status == ActionStatus.RESTART_TASK:
+                if task_restarts < 1:
+                    task_restarts += 1
+                    self._log(f"  🔄 Restarting task '{name}' from step 1 after reconnect")
+                    i = 0
+                    continue
+                else:
+                    self._log(f"  ⚠ Reconnect during task '{name}' — already restarted once, continuing from current step")
 
             if result.status == ActionStatus.SUCCESS:
                 self.stats.actions_succeeded += 1
@@ -537,16 +547,20 @@ class BotEngine:
         # Only recover on hard failures — not on SKIPPED or ABORT_TASK
         hard_failure = result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
 
-        # ADB device disconnect: pause execution, restart emulator, then retry once
+        # ADB device disconnect: restart emulator, then restart the task from step 1
         if hard_failure and self._is_device_disconnect(result.message):
             self._log("  ⚠ ADB device not found — pausing tasks to restart emulator...")
             self._log("  ⚠ Troubleshooting: close and reopen the emulator instance to restore the ADB connection")
             if self.on_device_not_found:
                 reconnected = self.on_device_not_found()
                 if reconnected:
-                    self._log("  ✓ Emulator reconnected — resuming")
-                    result = self.executor.execute(action)
-                    hard_failure = result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
+                    self._log("  ✓ Emulator reconnected — restarting task from beginning")
+                    self._recover_view()
+                    return ActionResult(
+                        status=ActionStatus.RESTART_TASK,
+                        action=action,
+                        message="Emulator reconnected — restarting task",
+                    )
                 else:
                     self._log("  ✗ Emulator restart failed — continuing with remaining tasks")
 

@@ -25,11 +25,12 @@ from paths import get_resource_dir
 # ---------------------------------------------------------------------------
 
 class ActionStatus(Enum):
-    SUCCESS     = "success"
-    FAILED      = "failed"
-    SKIPPED     = "skipped"
-    TIMEOUT     = "timeout"
-    ABORT_TASK  = "abort_task"
+    SUCCESS      = "success"
+    FAILED       = "failed"
+    SKIPPED      = "skipped"
+    TIMEOUT      = "timeout"
+    ABORT_TASK   = "abort_task"
+    RESTART_TASK = "restart_task"
 
 
 @dataclass
