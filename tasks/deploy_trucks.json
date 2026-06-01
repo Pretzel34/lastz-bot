@@ -1,0 +1,86 @@
+{
+  "name": "deploy_trucks",
+  "actions": [
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_truck_icon.png",
+      "required": true
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 80.9,
+      "y_pct": 95.0,
+      "note": "My Trucks"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "loop_while_template",
+      "template": "btn_collect_truck.png",
+      "max_iterations": 10,
+      "on_each": [
+        {
+          "action": "if_template_tap",
+          "template": "btn_collect_truck.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 4.0
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_post_bounty_claim_universal.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 3.0
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_press_back.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 3.0,
+          "note": "Wait for My Trucks list to reload before next loop check"
+        }
+      ]
+    },
+    {
+      "action": "loop_while_template",
+      "template": "btn_send_truck.png",
+      "max_iterations": 10,
+      "on_each": [
+        {
+          "action": "if_template_tap",
+          "template": "btn_send_truck.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 4.0
+        },
+        {
+          "action": "check_truck_quality"
+        },
+        {
+          "action": "wait",
+          "seconds": 4.0
+        }
+      ]
+    }
+  ]
+}

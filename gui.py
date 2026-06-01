@@ -195,6 +195,18 @@ TASK_CATEGORIES = [
         ]
     },
     {
+        "key":   "trucks",
+        "label": "Trucks",
+        "icon":  "🚚",
+        "settings": [
+            {"key": "enabled",         "label": "Enable Trucks",          "type": "toggle",  "default": False},
+            {"key": "allowed_trucks",  "label": "Allowed Trucks to Send", "type": "select",  "default": "S & A Trucks",
+             "options": ["S & A Trucks", "B, C, & D", "All"]},
+            {"key": "use_diamonds",    "label": "Use Diamonds",           "type": "toggle",  "default": False},
+            {"key": "refresh_tickets", "label": "Use Refresh Tickets",    "type": "spinner", "default": 0, "min": 0, "max": 20},
+        ]
+    },
+    {
         "key":   "bounties",
         "label": "Bounty Missions",
         "icon":  "🎯",
@@ -1687,9 +1699,12 @@ class BotApp(ctk.CTk):
         self._log(f"▶ Starting {name} — {emu_type} index={idx}, port={port}", "accent")
         self._start_timer()
 
+        _work_started = threading.Event()
+
         def do():
             if _semaphore:
                 _semaphore.acquire()
+            _work_started.set()  # signal watchdog: semaphore acquired, start timeout now
             try:
                 # If Stop All was clicked while this farm was queued, bail out immediately
                 if self._halted.is_set():
@@ -1929,6 +1944,28 @@ class BotApp(ctk.CTk):
                 # Record cycle completion time (used for "Next Cycle" countdown)
                 self.after(0, self._on_farm_cycle_complete)
 
+                # Maintenance: ADB cleanup while emulator is still running
+                _maint_cfg = self.bot_settings.get("maintenance", {})
+                _maint_enabled = _maint_cfg.get("enabled", True)
+                _every_n = int(_maint_cfg.get("cleanup_every_n_runs", 50))
+                _needs_clean = False
+                if _maint_enabled and _every_n > 0:
+                    try:
+                        from maintenance import MaintenanceManager
+                        _maint = MaintenanceManager(
+                            emulator_type=self.bot_settings.get("emulator", "MEmu"),
+                            log_callback=lambda m: self.after(0, lambda msg=m: self._log(msg, "info")),
+                        )
+                        _needs_clean = _maint.is_due(farm.get("port", 0), _every_n)
+                        _maint.record_run(farm.get("port", 0))
+                        if _needs_clean:
+                            self.after(0, lambda: self._log(
+                                f"[Maintenance] {name} — run {_every_n} reached, cleaning...", "info"))
+                            _maint.run_adb_cleanup(engine.bot)
+                    except Exception as _me:
+                        self.after(0, lambda e=_me: self._log(
+                            f"[Maintenance] ADB cleanup error: {e}", "warn"))
+
                 # Close the emulator instance after tasks complete
                 try:
                     launcher.stop_instance(idx)
@@ -1938,6 +1975,20 @@ class BotApp(ctk.CTk):
                             self._arrange_memu_windows()
                 except Exception:
                     pass
+
+                # Maintenance: disk cleanup after emulator has stopped
+                if _maint_enabled and _needs_clean:
+                    try:
+                        _maint.run_disk_cleanup(
+                            install_path=self.bot_settings.get("memu_path", ""),
+                            instance_index=farm.get("emu_index", idx),
+                        )
+                        _maint.reset_count(farm.get("port", 0))
+                        self.after(0, lambda: self._log(
+                            f"[Maintenance] {name} — cleanup complete, counter reset", "info"))
+                    except Exception as _me:
+                        self.after(0, lambda e=_me: self._log(
+                            f"[Maintenance] Disk cleanup error: {e}", "warn"))
 
             except Exception as e:
                 import traceback
@@ -1960,6 +2011,7 @@ class BotApp(ctk.CTk):
             _w_idx     = idx
 
             def _watchdog():
+                _work_started.wait()  # don't start the clock until this farm acquires the semaphore
                 farm_thread.join(timeout=_w_timeout)
                 if not farm_thread.is_alive():
                     return  # finished cleanly — nothing to do
@@ -2215,6 +2267,25 @@ class BotApp(ctk.CTk):
                 else:
                     self._log(f"  ⚠ {label} — tasks/{json_key}.json not found, skipping", "warn")
 
+        def _add_trucks():
+            trucks_cfg = farm_tasks.get("trucks", {})
+            if not trucks_cfg.get("enabled", False):
+                self._log("  Trucks disabled — skipping", "warn")
+                return
+            json_file = tasks_dir / "deploy_trucks.json"
+            if json_file.exists():
+                try:
+                    with open(json_file) as f:
+                        data = _json.load(f)
+                    actions = data.get("actions", data) if isinstance(data, dict) else data
+                    tasks.append({"name": "Deploy Trucks", "actions": actions,
+                                  "farm_settings": {"trucks": trucks_cfg}})
+                    self._log(f"  ✓ Deploy Trucks — {len(actions)} actions", "info")
+                except Exception as e:
+                    self._log(f"  ✗ Failed to load deploy_trucks.json: {e}", "error")
+            else:
+                self._log("  ⚠ Deploy Trucks — tasks/deploy_trucks.json not found, skipping", "warn")
+
         def _add_bounties():
             bounty_cfg = farm_tasks.get("bounties", {})
             if not bounty_cfg.get("enabled", True):
@@ -2263,6 +2334,7 @@ class BotApp(ctk.CTk):
             "gathering":       _add_gathering,
             "alliance":        _add_alliance,
             "alliance_mining": _add_alliance_mining,
+            "trucks":          _add_trucks,
             "bounties":        _add_bounties,
         }
 

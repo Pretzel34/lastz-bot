@@ -220,7 +220,9 @@ class ActionExecutor:
             "compare_resources":        self._compare_resources,
             "read_resource_priority":   self._read_resource_priority,
             "loop_until_template":      self._loop_until_template,
+            "loop_while_template":      self._loop_while_template,
             "loop_task":                self._loop_task,
+            "check_truck_quality":      self._check_truck_quality,
         }
 
         handler = handlers.get(action_type)
@@ -1346,6 +1348,136 @@ class ActionExecutor:
                     return sub_result
 
         return self._ok(action, f"loop_until_template: reached max_iterations ({max_iter}) without finding done template")
+
+    def _loop_while_template(self, action: dict) -> ActionResult:
+        """
+        Run on_each actions repeatedly as long as a template is visible.
+        Checks for the template at the top of every iteration; exits when not found.
+
+        Required:
+          template        - template filename to check each iteration
+
+        Optional:
+          on_each         - list of actions to run each iteration (default: [])
+          max_iterations  - safety cap (default: 10)
+          threshold       - vision confidence override for the check
+
+        Example:
+          {
+            "action": "loop_while_template",
+            "template": "btn_collect_truck.png",
+            "max_iterations": 4,
+            "on_each": [ ... ]
+          }
+        """
+        template  = action.get("template")
+        if not template:
+            return self._fail(action, "loop_while_template requires 'template'")
+
+        on_each   = action.get("on_each", [])
+        max_iter  = int(action.get("max_iterations", 10))
+        threshold = float(action.get("threshold")) if action.get("threshold") is not None else None
+
+        for iteration in range(max_iter):
+            if self._stop_event and self._stop_event.is_set():
+                return self._ok(action, f"loop_while_template: stop requested after {iteration} iteration(s)")
+
+            screenshot = self.bot.screenshot()
+            path  = self._template_path(template)
+            match = self.vision.find_template(screenshot, path, threshold=threshold)
+            conf  = getattr(match, "confidence", 0) if match else 0
+            self.log_callback and self.log_callback(
+                f"  [loop_while_template] iter {iteration + 1}/{max_iter} — '{template}' conf={conf:.3f} found={bool(match)}")
+
+            if not match:
+                return self._ok(action, f"loop_while_template: '{template}' not found — exiting after {iteration} iteration(s)")
+
+            for sub in on_each:
+                if self._stop_event and self._stop_event.is_set():
+                    return self._ok(action, f"loop_while_template: stop requested mid-iteration {iteration + 1}")
+                sub_result = self.execute(sub)
+                if sub_result.status == ActionStatus.ABORT_TASK:
+                    return sub_result
+
+        return self._ok(action, f"loop_while_template: reached max_iterations ({max_iter})")
+
+    def _check_truck_quality(self, action: dict) -> ActionResult:
+        """
+        Identifies truck quality on screen and taps go or refresh based on farm settings.
+
+        Farm settings (trucks.*):
+          enabled         - skip entirely if False
+          allowed_trucks  - "S & A Trucks" | "B, C, & D" | "All"
+          use_diamonds    - bool (reserved; affects future diamond-refresh logic)
+          refresh_tickets - int, max number of refresh attempts before giving up
+
+        Templates:
+          btn_s_truck.png, btn_a_truck.png — S/A quality
+          btn_b_truck.png, btn_c_truck.png, btn_d_truck.png — B/C/D quality
+
+        On match:    taps btn_truck_go.png
+        On no match: taps btn_truck_refresh.png (up to refresh_tickets times), then skips
+        """
+        truck_cfg     = self.farm_settings.get("trucks", {})
+        enabled       = truck_cfg.get("enabled", True)
+        allowed       = truck_cfg.get("allowed_trucks", "All")
+        max_refreshes = int(truck_cfg.get("refresh_tickets", 0))
+
+        if not enabled:
+            return self._ok(action, "check_truck_quality: trucks disabled — skipping")
+
+        QUALITY_MAP = {
+            "S & A Trucks": ["btn_s_trucks.png", "btn_a_truck.png"],
+            "B, C, & D":    ["btn_b_truck.png", "btn_c_truck.png", "btn_d_truck.png"],
+            "All":          ["btn_s_trucks.png", "btn_a_truck.png",
+                             "btn_b_truck.png", "btn_c_truck.png", "btn_d_truck.png"],
+        }
+        allowed_templates = QUALITY_MAP.get(allowed, QUALITY_MAP["All"])
+
+        for attempt in range(max_refreshes + 1):
+            if self._stop_event and self._stop_event.is_set():
+                return self._ok(action, "check_truck_quality: stop requested")
+
+            screenshot = self.bot.screenshot()
+
+            matched = None
+            for tmpl_name in allowed_templates:
+                path  = self._template_path(tmpl_name)
+                match = self.vision.find_template(screenshot, path)
+                conf  = getattr(match, "confidence", 0) if match else 0
+                self.log_callback and self.log_callback(
+                    f"  [check_truck_quality] '{tmpl_name}' conf={conf:.3f} found={bool(match)}")
+                if match:
+                    matched = tmpl_name
+                    break
+
+            if matched:
+                self.log_callback and self.log_callback(
+                    f"  [check_truck_quality] Match: '{matched}' (allowed={allowed}) — tapping GO")
+                go_path  = self._template_path("btn_truck_go.png")
+                go_match = self.vision.find_template(screenshot, go_path)
+                if go_match:
+                    self.bot.tap(go_match.x, go_match.y)
+                    return self._ok(action, f"check_truck_quality: matched '{matched}' — truck sent")
+                return self._fail(action, "check_truck_quality: match found but btn_truck_go not visible")
+
+            # No match on this attempt
+            if attempt < max_refreshes:
+                self.log_callback and self.log_callback(
+                    f"  [check_truck_quality] No match (attempt {attempt + 1}/{max_refreshes + 1}) — refreshing")
+                ref_path  = self._template_path("btn_truck_refresh.png")
+                ref_match = self.vision.find_template(screenshot, ref_path)
+                if ref_match:
+                    self.bot.tap(ref_match.x, ref_match.y)
+                    time.sleep(1.5)
+                else:
+                    self.log_callback and self.log_callback(
+                        "  [check_truck_quality] btn_truck_refresh not on screen — stopping early")
+                    break
+
+        return self._ok(action,
+            f"check_truck_quality: no qualifying truck after {max_refreshes} refresh(es) "
+            f"(allowed='{allowed}') — skipped")
 
     def _loop_task(self, action: dict) -> ActionResult:
         """

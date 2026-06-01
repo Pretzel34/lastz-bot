@@ -19,7 +19,7 @@ from enum import Enum
 
 from adb_wrapper import ADBWrapper, InstanceManager
 from vision import VisionEngine
-from action_executor import ActionExecutor, ActionStatus
+from action_executor import ActionExecutor, ActionResult, ActionStatus
 import sys
 from paths import get_resource_dir, ensure_app_dir
 
