@@ -1443,7 +1443,7 @@ class ActionExecutor:
             matched = None
             for tmpl_name in allowed_templates:
                 path  = self._template_path(tmpl_name)
-                match = self.vision.find_template(screenshot, path)
+                match = self.vision.find_template(screenshot, path, threshold=0.85)
                 conf  = getattr(match, "confidence", 0) if match else 0
                 self.log_callback and self.log_callback(
                     f"  [check_truck_quality] '{tmpl_name}' conf={conf:.3f} found={bool(match)}")
@@ -1455,11 +1455,15 @@ class ActionExecutor:
                 self.log_callback and self.log_callback(
                     f"  [check_truck_quality] Match: '{matched}' (allowed={allowed}) — tapping GO")
                 go_path  = self._template_path("btn_truck_go.png")
-                go_match = self.vision.find_template(screenshot, go_path)
+                time.sleep(0.5)
+                go_screenshot = self.bot.screenshot()
+                go_match = self.vision.find_template(go_screenshot, go_path)
                 if go_match:
                     self.bot.tap(go_match.x, go_match.y)
                     return self._ok(action, f"check_truck_quality: matched '{matched}' — truck sent")
-                return self._fail(action, "check_truck_quality: match found but btn_truck_go not visible")
+                self.log_callback and self.log_callback(
+                    "  [check_truck_quality] btn_truck_go not visible — skipping send")
+                return self._ok(action, "check_truck_quality: GO button not found — skipping")
 
             # No match on this attempt
             if attempt < max_refreshes:

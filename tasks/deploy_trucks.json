@@ -78,7 +78,17 @@
         },
         {
           "action": "wait",
-          "seconds": 4.0
+          "seconds": 2.0
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_press_back.png",
+          "required": false,
+          "note": "Dismiss quality selection panel if truck was skipped or sent"
+        },
+        {
+          "action": "wait",
+          "seconds": 3.0
         }
       ]
     }
