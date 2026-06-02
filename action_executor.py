@@ -1671,6 +1671,10 @@ class ActionExecutor:
                     continue
                 self.bot.tap(loot_match.x, loot_match.y)
                 time.sleep(3.0)
+                try:
+                    self.bot.screenshot().save(str(_debug_log.parent / "post_loot.png"))
+                except Exception:
+                    pass
 
                 # Plunder
                 _dbg("  [truck_attack] tapping Plunder")
