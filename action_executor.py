@@ -1660,13 +1660,21 @@ class ActionExecutor:
                 except Exception:
                     pass
 
-                # Plunder — log confidence to debug threshold issues
-                plunder_ss = self.bot.screenshot()
-                plunder_match = self.vision.find_template(
-                    plunder_ss, self._template_path("btn_other_truck_plunder.png"), threshold=0.5
-                )
-                conf = getattr(plunder_match, "confidence", 0)
-                _dbg(f"  [truck_attack] Plunder search conf={conf:.3f} found={bool(plunder_match)}")
+                # Plunder — try primary + alternates, pick best confidence
+                _PLUNDER_TMPLS = [
+                    "btn_other_truck_plunder.png",
+                    "btn_other_trucks_plunder_alt.png",
+                    "btn_other_trucks_plunder_alt_1.png",
+                    "btn_other_trucks_plunder_alt_2.png",
+                ]
+                plunder_ss    = self.bot.screenshot()
+                plunder_match = None
+                for _pt in _PLUNDER_TMPLS:
+                    _m = self.vision.find_template(plunder_ss, self._template_path(_pt), threshold=0.5)
+                    _c = getattr(_m, "confidence", 0)
+                    _dbg(f"  [truck_attack] Plunder '{_pt}' conf={_c:.3f} found={bool(_m)}")
+                    if _m and (plunder_match is None or _c > getattr(plunder_match, "confidence", 0)):
+                        plunder_match = _m
                 if not plunder_match:
                     _dbg("  [truck_attack] Plunder button not found — backing off")
                     _tap_template("btn_back.png", self.bot.screenshot())
