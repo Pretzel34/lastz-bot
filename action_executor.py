@@ -1660,9 +1660,14 @@ class ActionExecutor:
                 except Exception:
                     pass
 
-                # Plunder
-                _dbg("  [truck_attack] tapping Plunder")
-                if not _tap_template("btn_other_truck_plunder.png"):
+                # Plunder — log confidence to debug threshold issues
+                plunder_ss = self.bot.screenshot()
+                plunder_match = self.vision.find_template(
+                    plunder_ss, self._template_path("btn_other_truck_plunder.png"), threshold=0.5
+                )
+                conf = getattr(plunder_match, "confidence", 0)
+                _dbg(f"  [truck_attack] Plunder search conf={conf:.3f} found={bool(plunder_match)}")
+                if not plunder_match:
                     _dbg("  [truck_attack] Plunder button not found — backing off")
                     _tap_template("btn_back.png", self.bot.screenshot())
                     time.sleep(2.0)
@@ -1670,6 +1675,8 @@ class ActionExecutor:
                         break
                     time.sleep(1.5)
                     continue
+                _dbg(f"  [truck_attack] tapping Plunder at ({plunder_match.x}, {plunder_match.y})")
+                self.bot.tap(plunder_match.x, plunder_match.y)
                 time.sleep(3.0)
 
                 # Fight — no power comparison, user targets a specific state and knows they can win
