@@ -1,0 +1,27 @@
+{
+  "name": "truck_attack",
+  "actions": [
+    {
+      "action": "if_template_tap",
+      "template": "btn_truck_icon.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 35.0,
+      "y_pct": 95.6,
+      "note": "Other Trucks"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "execute_truck_attack"
+    }
+  ]
+}

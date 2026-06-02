@@ -199,11 +199,14 @@ TASK_CATEGORIES = [
         "label": "Trucks",
         "icon":  "🚚",
         "settings": [
-            {"key": "enabled",         "label": "Enable Trucks",          "type": "toggle",  "default": False},
-            {"key": "allowed_trucks",  "label": "Allowed Trucks to Send", "type": "select",  "default": "S & A Trucks",
+            {"key": "enabled",              "label": "Enable Trucks",          "type": "toggle",  "default": False},
+            {"key": "allowed_trucks",       "label": "Allowed Trucks to Send", "type": "select",  "default": "S & A Trucks",
              "options": ["S & A Trucks", "B, C, & D", "All"]},
-            {"key": "use_diamonds",    "label": "Use Diamonds",           "type": "toggle",  "default": False},
-            {"key": "refresh_tickets", "label": "Use Refresh Tickets",    "type": "spinner", "default": 0, "min": 0, "max": 20},
+            {"key": "use_diamonds",         "label": "Use Diamonds",           "type": "toggle",  "default": False},
+            {"key": "refresh_tickets",      "label": "Use Refresh Tickets",    "type": "spinner", "default": 0, "min": 0, "max": 20},
+            {"key": "attack_truck",         "label": "Attack Truck",           "type": "toggle",  "default": False},
+            {"key": "attack_state",         "label": "Target State #",         "type": "text",    "default": "", "max_length": 4, "placeholder": "e.g. 404"},
+            {"key": "attack_max_attempts",  "label": "Max Refresh Attempts",   "type": "spinner", "default": 3, "min": 1, "max": 20},
         ]
     },
     {
@@ -1234,6 +1237,19 @@ class BotApp(ctk.CTk):
                               text_color=C["text"], font=FM
                               ).pack(side="right", pady=6)
                 widget_refs[skey] = ("number", var)
+
+            elif setting["type"] == "text":
+                var = ctk.StringVar(value=str(sval))
+                max_len = setting.get("max_length", 100)
+                ph      = setting.get("placeholder", "")
+                vcmd    = (srow.register(lambda v, ml=max_len: len(v) <= ml), "%P")
+                ctk.CTkEntry(srow, textvariable=var, width=80,
+                              fg_color=C["card"], border_color=C["border"],
+                              text_color=C["text"], font=FM,
+                              validate="key", validatecommand=vcmd,
+                              placeholder_text=ph,
+                              ).pack(side="right", pady=6)
+                widget_refs[skey] = ("text", var)
 
             elif setting["type"] == "spinner":
                 s_min = setting.get("min", 0)
@@ -2285,6 +2301,21 @@ class BotApp(ctk.CTk):
                     self._log(f"  ✗ Failed to load deploy_trucks.json: {e}", "error")
             else:
                 self._log("  ⚠ Deploy Trucks — tasks/deploy_trucks.json not found, skipping", "warn")
+
+            if trucks_cfg.get("attack_truck", False):
+                atk_file = tasks_dir / "truck_attack.json"
+                if atk_file.exists():
+                    try:
+                        with open(atk_file) as f:
+                            data = _json.load(f)
+                        actions = data.get("actions", data) if isinstance(data, dict) else data
+                        tasks.append({"name": "Truck Attack", "actions": actions,
+                                      "farm_settings": {"trucks": trucks_cfg}})
+                        self._log(f"  ✓ Truck Attack — {len(actions)} actions", "info")
+                    except Exception as e:
+                        self._log(f"  ✗ Failed to load truck_attack.json: {e}", "error")
+                else:
+                    self._log("  ⚠ Truck Attack — tasks/truck_attack.json not found, skipping", "warn")
 
         def _add_bounties():
             bounty_cfg = farm_tasks.get("bounties", {})

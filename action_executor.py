@@ -223,6 +223,7 @@ class ActionExecutor:
             "loop_while_template":      self._loop_while_template,
             "loop_task":                self._loop_task,
             "check_truck_quality":      self._check_truck_quality,
+            "execute_truck_attack":     self._execute_truck_attack,
         }
 
         handler = handlers.get(action_type)
@@ -1512,6 +1513,207 @@ class ActionExecutor:
         return self._ok(action,
             f"check_truck_quality: no qualifying truck after {max_refreshes} refresh(es) "
             f"(allowed='{allowed}') — skipped")
+
+    def _execute_truck_attack(self, action: dict) -> ActionResult:
+        """
+        Scans enemy trucks in the Other Trucks view, filters by target state, compares
+        power before committing to a fight, and handles the formation-save / next-truck /
+        refresh cycle automatically.
+
+        Farm settings (trucks.*):
+          attack_truck         - bool, must be True or this action is a no-op
+          attack_state         - 1-4 digit string; only attack trucks from this state
+                                 (leave empty to attack any state)
+          attack_max_attempts  - int, how many full refresh cycles to try (default 3)
+
+        Templates used:
+          btn_other_blue_truck, btn_other_white_truck, btn_other_purple_truck
+          btn_next_truck, btn_other_truck_refresh
+          btn_other_truck_loot, btn_other_truck_plunder
+          btn_other_truck_fight, btn_other_truck_fight_cont
+          btn_back
+        """
+        import re as _re
+
+        trucks_cfg   = self.farm_settings.get("trucks", {})
+        if not trucks_cfg.get("attack_truck", False):
+            return self._ok(action, "execute_truck_attack: disabled — skipping")
+
+        target_state = str(trucks_cfg.get("attack_state", "")).strip()
+        max_attempts = int(trucks_cfg.get("attack_max_attempts", 3))
+
+        TRUCK_TEMPLATES = [
+            "btn_other_blue_truck.png",
+            "btn_other_white_truck.png",
+            "btn_other_purple_truck.png",
+        ]
+
+        def _parse_power(text: str) -> float:
+            t = text.replace(",", "").replace(" ", "")
+            m = _re.search(r"([\d.]+)\s*([KkMm]?)", t)
+            if not m:
+                return 0.0
+            val = float(m.group(1))
+            sfx = m.group(2).upper()
+            if sfx == "M":
+                val *= 1_000_000
+            elif sfx == "K":
+                val *= 1_000
+            return val
+
+        def _ocr_state(ss) -> str:
+            """Return the state number string (e.g. '404') from the truck detail header."""
+            w, h = ss.size
+            results = self.vision.read_text(
+                ss,
+                region=(int(w * 0.05), int(h * 0.03), int(w * 0.90), int(h * 0.13)),
+                min_confidence=0.3,
+            )
+            raw = " ".join(r.text for r in results)
+            self._log(f"  [truck_attack] state OCR: '{raw}'")
+            m = _re.search(r"#\s*(\d{1,4})", raw)
+            return m.group(1) if m else ""
+
+        def _ocr_powers(ss):
+            """Return (our_power, their_power) floats from the fight preview screen."""
+            w, h = ss.size
+            left_results  = self.vision.read_text(
+                ss,
+                region=(int(w * 0.05), int(h * 0.06), int(w * 0.45), int(h * 0.18)),
+                min_confidence=0.3,
+            )
+            right_results = self.vision.read_text(
+                ss,
+                region=(int(w * 0.55), int(h * 0.06), int(w * 0.95), int(h * 0.18)),
+                min_confidence=0.3,
+            )
+            left_raw  = " ".join(r.text for r in left_results)
+            right_raw = " ".join(r.text for r in right_results)
+            self._log(f"  [truck_attack] power OCR — left: '{left_raw}'  right: '{right_raw}'")
+            return _parse_power(left_raw), _parse_power(right_raw)
+
+        def _tap_template(tmpl_name, screenshot=None) -> bool:
+            if screenshot is None:
+                screenshot = self.bot.screenshot()
+            m = self.vision.find_template(screenshot, self._template_path(tmpl_name))
+            if m:
+                self.bot.tap(m.x, m.y)
+                return True
+            return False
+
+        def _open_first_truck() -> bool:
+            """Tap any visible truck icon to open its detail panel. Returns True on success."""
+            ss = self.bot.screenshot()
+            for tmpl in TRUCK_TEMPLATES:
+                m = self.vision.find_template(ss, self._template_path(tmpl))
+                if m:
+                    self._log(f"  [truck_attack] tapping '{tmpl}'")
+                    self.bot.tap(m.x, m.y)
+                    time.sleep(2.0)
+                    return True
+            return False
+
+        skip_set: set = set()  # state IDs of trucks we decided not to fight
+
+        if not _open_first_truck():
+            return ActionResult(
+                status=ActionStatus.ABORT_TASK,
+                action=action,
+                message="execute_truck_attack: no truck icons visible",
+            )
+
+        for attempt in range(max_attempts):
+            if self._stop_event and self._stop_event.is_set():
+                return self._ok(action, "execute_truck_attack: stop requested")
+
+            self._log(f"  [truck_attack] cycle {attempt + 1}/{max_attempts}")
+
+            for slot in range(12):
+                if self._stop_event and self._stop_event.is_set():
+                    return self._ok(action, "execute_truck_attack: stop requested")
+
+                ss    = self.bot.screenshot()
+                state = _ocr_state(ss)
+                self._log(f"  [truck_attack] slot {slot + 1}/12 — state='{state}' target='{target_state}'")
+
+                # Skip trucks we already chose not to fight
+                if state and state in skip_set:
+                    self._log(f"  [truck_attack] '{state}' in skip list — advancing")
+                    if not _tap_template("btn_next_truck.png"):
+                        break
+                    time.sleep(1.5)
+                    continue
+
+                # Apply state filter
+                if target_state and state != target_state:
+                    self._log(f"  [truck_attack] state mismatch '{state}' — advancing")
+                    if not _tap_template("btn_next_truck.png"):
+                        break
+                    time.sleep(1.5)
+                    continue
+
+                # State matches (or no filter) — attempt loot
+                self._log(f"  [truck_attack] state '{state}' matched — tapping Loot")
+                loot_ss    = self.bot.screenshot()
+                loot_match = self.vision.find_template(loot_ss, self._template_path("btn_other_truck_loot.png"))
+                if not loot_match:
+                    self._log("  [truck_attack] Loot button not found — advancing")
+                    if not _tap_template("btn_next_truck.png"):
+                        break
+                    time.sleep(1.5)
+                    continue
+                self.bot.tap(loot_match.x, loot_match.y)
+                time.sleep(3.0)
+
+                # Plunder
+                _tap_template("btn_other_truck_plunder.png")
+                time.sleep(3.0)
+
+                # Power comparison on fight preview
+                fight_ss          = self.bot.screenshot()
+                our_pw, their_pw  = _ocr_powers(fight_ss)
+                self._log(f"  [truck_attack] power — ours={our_pw:,.0f}  theirs={their_pw:,.0f}")
+
+                if their_pw > 0 and their_pw > our_pw:
+                    self._log("  [truck_attack] outmatched — backing off")
+                    if state:
+                        skip_set.add(state)
+                    _tap_template("btn_back.png", self.bot.screenshot())
+                    time.sleep(2.0)
+                    if not _tap_template("btn_next_truck.png"):
+                        break
+                    time.sleep(1.5)
+                    continue
+
+                # Commit to fight
+                self._log("  [truck_attack] power check passed — fighting")
+                if _tap_template("btn_other_truck_fight.png", self.bot.screenshot()):
+                    self._log("  [truck_attack] fight started — waiting 20s")
+                    time.sleep(20.0)
+                    _tap_template("btn_other_truck_fight_cont.png")
+                    return self._ok(action, f"execute_truck_attack: fight complete (state={state})")
+
+                # Fight button not found — back out and keep scanning
+                self._log("  [truck_attack] Fight button not visible — backing off")
+                _tap_template("btn_back.png", self.bot.screenshot())
+                time.sleep(2.0)
+                if not _tap_template("btn_next_truck.png"):
+                    break
+                time.sleep(1.5)
+
+            # Exhausted 12 slots — refresh list for next cycle
+            if attempt < max_attempts - 1:
+                self._log("  [truck_attack] 12 slots scanned — refreshing truck list")
+                if not _tap_template("btn_other_truck_refresh.png"):
+                    self._log("  [truck_attack] refresh button not found — stopping")
+                    break
+                time.sleep(3.0)
+                if not _open_first_truck():
+                    self._log("  [truck_attack] no trucks after refresh — stopping")
+                    break
+
+        return self._ok(action,
+            f"execute_truck_attack: no target found after {max_attempts} cycle(s)")
 
     def _loop_task(self, action: dict) -> ActionResult:
         """
