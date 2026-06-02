@@ -1580,10 +1580,10 @@ class ActionExecutor:
         def _ocr_state(ss) -> str:
             """Return the state number string (e.g. '404') from the truck detail header."""
             w, h = ss.size
-            x1, y1 = int(w * 0.02), int(h * 0.05)
-            x2, y2 = int(w * 0.92), int(h * 0.55)
-            # Scan from 5% down to 55% — captures both the blue state header (#NNN)
-            # at the top of the popup and the player name line below it.
+            x1, y1 = int(w * 0.02), int(h * 0.57)
+            x2, y2 = int(w * 0.92), int(h * 0.75)
+            # Popup header sits at the bottom of the screen (~60-67% height).
+            # Scan 57-75% to capture the blue #NNN header band.
             results = self.vision.read_text(
                 ss,
                 region=(x1, y1, x2, y2),
