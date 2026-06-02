@@ -1631,7 +1631,7 @@ class ActionExecutor:
             )
             left_raw  = " ".join(r.text for r in left_results)
             right_raw = " ".join(r.text for r in right_results)
-            self._log(f"  [truck_attack] power OCR — left: '{left_raw}'  right: '{right_raw}'")
+            _dbg(f"  [truck_attack] power OCR — left: '{left_raw}'  right: '{right_raw}'")
             return _parse_power(left_raw), _parse_power(right_raw)
 
         def _tap_template(tmpl_name, screenshot=None) -> bool:
@@ -1649,7 +1649,7 @@ class ActionExecutor:
             for tmpl in TRUCK_TEMPLATES:
                 m = self.vision.find_template(ss, self._template_path(tmpl))
                 if m:
-                    self._log(f"  [truck_attack] tapping '{tmpl}'")
+                    _dbg(f"  [truck_attack] tapping '{tmpl}'")
                     self.bot.tap(m.x, m.y)
                     time.sleep(2.0)
                     return True
@@ -1695,11 +1695,11 @@ class ActionExecutor:
                     continue
 
                 # State matches (or no filter) — attempt loot
-                self._log(f"  [truck_attack] state '{state}' matched — tapping Loot")
+                _dbg(f"  [truck_attack] state '{state}' matched — tapping Loot")
                 loot_ss    = self.bot.screenshot()
                 loot_match = self.vision.find_template(loot_ss, self._template_path("btn_other_truck_loot.png"))
                 if not loot_match:
-                    self._log("  [truck_attack] Loot button not found — advancing")
+                    _dbg("  [truck_attack] Loot button not found — advancing")
                     if not _tap_template("btn_next_truck.png"):
                         break
                     time.sleep(1.5)
@@ -1708,16 +1708,23 @@ class ActionExecutor:
                 time.sleep(3.0)
 
                 # Plunder
-                _tap_template("btn_other_truck_plunder.png")
+                if not _tap_template("btn_other_truck_plunder.png"):
+                    _dbg("  [truck_attack] Plunder button not found — backing off")
+                    _tap_template("btn_back.png", self.bot.screenshot())
+                    time.sleep(2.0)
+                    if not _tap_template("btn_next_truck.png"):
+                        break
+                    time.sleep(1.5)
+                    continue
                 time.sleep(3.0)
 
                 # Power comparison on fight preview
                 fight_ss          = self.bot.screenshot()
                 our_pw, their_pw  = _ocr_powers(fight_ss)
-                self._log(f"  [truck_attack] power — ours={our_pw:,.0f}  theirs={their_pw:,.0f}")
+                _dbg(f"  [truck_attack] power — ours={our_pw:,.0f}  theirs={their_pw:,.0f}")
 
                 if their_pw > 0 and their_pw > our_pw:
-                    self._log("  [truck_attack] outmatched — backing off")
+                    _dbg("  [truck_attack] outmatched — backing off")
                     if state:
                         skip_set.add(state)
                     _tap_template("btn_back.png", self.bot.screenshot())
@@ -1728,15 +1735,15 @@ class ActionExecutor:
                     continue
 
                 # Commit to fight
-                self._log("  [truck_attack] power check passed — fighting")
+                _dbg("  [truck_attack] power check passed — fighting")
                 if _tap_template("btn_other_truck_fight.png", self.bot.screenshot()):
-                    self._log("  [truck_attack] fight started — waiting 20s")
+                    _dbg("  [truck_attack] fight started — waiting 20s")
                     time.sleep(20.0)
                     _tap_template("btn_other_truck_fight_cont.png")
                     return self._ok(action, f"execute_truck_attack: fight complete (state={state})")
 
                 # Fight button not found — back out and keep scanning
-                self._log("  [truck_attack] Fight button not visible — backing off")
+                _dbg("  [truck_attack] Fight button not visible — backing off")
                 _tap_template("btn_back.png", self.bot.screenshot())
                 time.sleep(2.0)
                 if not _tap_template("btn_next_truck.png"):
@@ -1745,13 +1752,13 @@ class ActionExecutor:
 
             # Exhausted 12 slots — refresh list for next cycle
             if attempt < max_attempts - 1:
-                self._log("  [truck_attack] 12 slots scanned — refreshing truck list")
+                _dbg("  [truck_attack] 12 slots scanned — refreshing truck list")
                 if not _tap_template("btn_other_truck_refresh.png"):
-                    self._log("  [truck_attack] refresh button not found — stopping")
+                    _dbg("  [truck_attack] refresh button not found — stopping")
                     break
                 time.sleep(3.0)
                 if not _open_first_truck():
-                    self._log("  [truck_attack] no trucks after refresh — stopping")
+                    _dbg("  [truck_attack] no trucks after refresh — stopping")
                     break
 
         return self._ok(action,
