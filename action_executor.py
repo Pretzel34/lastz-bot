@@ -1575,14 +1575,18 @@ class ActionExecutor:
             except Exception:
                 pass
 
+        _ocr_save_counter = [0]  # mutable counter accessible inside nested function
+
         def _ocr_state(ss) -> str:
             """Return the state number string (e.g. '404') from the truck detail header."""
             w, h = ss.size
+            x1, y1 = int(w * 0.02), int(h * 0.05)
+            x2, y2 = int(w * 0.92), int(h * 0.55)
             # Scan from 5% down to 55% — captures both the blue state header (#NNN)
             # at the top of the popup and the player name line below it.
             results = self.vision.read_text(
                 ss,
-                region=(int(w * 0.02), int(h * 0.05), int(w * 0.92), int(h * 0.55)),
+                region=(x1, y1, x2, y2),
                 min_confidence=0.3,
             )
             raw = " ".join(r.text for r in results)
@@ -1599,6 +1603,17 @@ class ActionExecutor:
                 _dbg(f"  [truck_attack] state extracted (fallback): '{m.group(1)}'")
                 return m.group(1)
             _dbg("  [truck_attack] state OCR: no state number found")
+            # Save the full screenshot + cropped region so we can see what the bot sees
+            _ocr_save_counter[0] += 1
+            if _ocr_save_counter[0] <= 3:
+                try:
+                    _idx = _ocr_save_counter[0]
+                    ss.save(str(_debug_log.parent / f"ocr_full_{_idx}.png"))
+                    ss.crop((x1, y1, x2, y2)).save(
+                        str(_debug_log.parent / f"ocr_region_{_idx}.png"))
+                    _dbg(f"  [truck_attack] saved ocr_full_{_idx}.png and ocr_region_{_idx}.png")
+                except Exception as _e:
+                    _dbg(f"  [truck_attack] screenshot save failed: {_e}")
             return ""
 
         def _ocr_powers(ss):
