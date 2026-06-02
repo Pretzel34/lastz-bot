@@ -1552,6 +1552,19 @@ class ActionExecutor:
         _debug_log = _Path("logs") / "truck_attack_debug.log"
         _debug_log.parent.mkdir(exist_ok=True)
 
+        def _parse_power(text: str) -> float:
+            t = text.replace(",", "").replace(" ", "")
+            m = _re.search(r"([\d.]+)\s*([KkMm]?)", t)
+            if not m:
+                return 0.0
+            val = float(m.group(1))
+            sfx = m.group(2).upper()
+            if sfx == "M":
+                val *= 1_000_000
+            elif sfx == "K":
+                val *= 1_000
+            return val
+
         def _dbg(msg: str):
             """Write directly to file AND to GUI — survives bot being closed quickly."""
             self._log(msg)
@@ -1701,21 +1714,48 @@ class ActionExecutor:
                 self.bot.tap(plunder_match.x, plunder_match.y)
                 time.sleep(3.0)
 
-                # Fight — no power comparison, user targets a specific state and knows they can win
+                # Fight button — opens the battle screen where both powers are shown
                 _dbg("  [truck_attack] tapping Fight")
-                if _tap_template("btn_other_truck_fight.png", self.bot.screenshot()):
-                    _dbg("  [truck_attack] fight started — waiting 20s")
-                    time.sleep(20.0)
-                    _tap_template("btn_other_truck_fight_cont.png")
-                    return self._ok(action, f"execute_truck_attack: fight complete (state={state})")
+                if not _tap_template("btn_other_truck_fight.png", self.bot.screenshot()):
+                    _dbg("  [truck_attack] Fight button not visible — backing off")
+                    _tap_template("btn_back.png", self.bot.screenshot())
+                    time.sleep(2.0)
+                    if not _tap_template("btn_next_truck.png"):
+                        break
+                    time.sleep(1.5)
+                    continue
 
-                # Fight button not found — back out and keep scanning
-                _dbg("  [truck_attack] Fight button not visible — backing off")
-                _tap_template("btn_back.png", self.bot.screenshot())
+                # Power check on the battle screen before committing to fight
                 time.sleep(2.0)
-                if not _tap_template("btn_next_truck.png"):
-                    break
-                time.sleep(1.5)
+                fight_ss = self.bot.screenshot()
+                try:
+                    fight_ss.save(str(_debug_log.parent / "fight_screen.png"))
+                except Exception:
+                    pass
+                w, h = fight_ss.size
+                left_raw  = " ".join(r.text for r in self.vision.read_text(
+                    fight_ss, region=(int(w*0.05), int(h*0.10), int(w*0.45), int(h*0.35)), min_confidence=0.3))
+                right_raw = " ".join(r.text for r in self.vision.read_text(
+                    fight_ss, region=(int(w*0.55), int(h*0.10), int(w*0.95), int(h*0.35)), min_confidence=0.3))
+                our_pw    = _parse_power(left_raw)
+                their_pw  = _parse_power(right_raw)
+                _dbg(f"  [truck_attack] power check — ours={our_pw:,.0f} theirs={their_pw:,.0f}")
+                _dbg(f"  [truck_attack] power OCR left='{left_raw}'  right='{right_raw}'")
+
+                if their_pw > 0 and their_pw > our_pw:
+                    _dbg("  [truck_attack] outmatched — backing off")
+                    _tap_template("btn_back.png", fight_ss)
+                    time.sleep(2.0)
+                    if not _tap_template("btn_next_truck.png"):
+                        break
+                    time.sleep(1.5)
+                    continue
+
+                # Commit to fight
+                _dbg("  [truck_attack] power ok — tapping Fight Continue")
+                _tap_template("btn_other_truck_fight_cont.png")
+                time.sleep(20.0)
+                return self._ok(action, f"execute_truck_attack: fight complete (state={state})")
 
             # Exhausted 12 slots — refresh list for next cycle
             if attempt < max_attempts - 1:
