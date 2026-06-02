@@ -1548,19 +1548,6 @@ class ActionExecutor:
             "btn_other_purple_truck.png",
         ]
 
-        def _parse_power(text: str) -> float:
-            t = text.replace(",", "").replace(" ", "")
-            m = _re.search(r"([\d.]+)\s*([KkMm]?)", t)
-            if not m:
-                return 0.0
-            val = float(m.group(1))
-            sfx = m.group(2).upper()
-            if sfx == "M":
-                val *= 1_000_000
-            elif sfx == "K":
-                val *= 1_000
-            return val
-
         from pathlib import Path as _Path
         _debug_log = _Path("logs") / "truck_attack_debug.log"
         _debug_log.parent.mkdir(exist_ok=True)
@@ -1616,24 +1603,6 @@ class ActionExecutor:
                     _dbg(f"  [truck_attack] screenshot save failed: {_e}")
             return ""
 
-        def _ocr_powers(ss):
-            """Return (our_power, their_power) floats from the fight preview screen."""
-            w, h = ss.size
-            left_results  = self.vision.read_text(
-                ss,
-                region=(int(w * 0.05), int(h * 0.06), int(w * 0.45), int(h * 0.18)),
-                min_confidence=0.3,
-            )
-            right_results = self.vision.read_text(
-                ss,
-                region=(int(w * 0.55), int(h * 0.06), int(w * 0.95), int(h * 0.18)),
-                min_confidence=0.3,
-            )
-            left_raw  = " ".join(r.text for r in left_results)
-            right_raw = " ".join(r.text for r in right_results)
-            _dbg(f"  [truck_attack] power OCR — left: '{left_raw}'  right: '{right_raw}'")
-            return _parse_power(left_raw), _parse_power(right_raw)
-
         def _tap_template(tmpl_name, screenshot=None) -> bool:
             if screenshot is None:
                 screenshot = self.bot.screenshot()
@@ -1654,8 +1623,6 @@ class ActionExecutor:
                     time.sleep(2.0)
                     return True
             return False
-
-        skip_set: set = set()  # state IDs of trucks we decided not to fight
 
         if not _open_first_truck():
             return ActionResult(
@@ -1694,8 +1661,14 @@ class ActionExecutor:
                     time.sleep(1.5)
                     continue
 
-                # State matches (or no filter) — attempt loot
-                _dbg(f"  [truck_attack] state '{state}' matched — tapping Loot")
+                # State matches — save screenshot then attempt loot
+                _dbg(f"  [truck_attack] state '{state}' matched — saving screenshot")
+                try:
+                    self.bot.screenshot().save(str(_debug_log.parent / "match_found.png"))
+                except Exception:
+                    pass
+
+                _dbg(f"  [truck_attack] tapping Loot")
                 loot_ss    = self.bot.screenshot()
                 loot_match = self.vision.find_template(loot_ss, self._template_path("btn_other_truck_loot.png"))
                 if not loot_match:
@@ -1708,6 +1681,7 @@ class ActionExecutor:
                 time.sleep(3.0)
 
                 # Plunder
+                _dbg("  [truck_attack] tapping Plunder")
                 if not _tap_template("btn_other_truck_plunder.png"):
                     _dbg("  [truck_attack] Plunder button not found — backing off")
                     _tap_template("btn_back.png", self.bot.screenshot())
@@ -1718,24 +1692,8 @@ class ActionExecutor:
                     continue
                 time.sleep(3.0)
 
-                # Power comparison on fight preview
-                fight_ss          = self.bot.screenshot()
-                our_pw, their_pw  = _ocr_powers(fight_ss)
-                _dbg(f"  [truck_attack] power — ours={our_pw:,.0f}  theirs={their_pw:,.0f}")
-
-                if their_pw > 0 and their_pw > our_pw:
-                    _dbg("  [truck_attack] outmatched — backing off")
-                    if state:
-                        skip_set.add(state)
-                    _tap_template("btn_back.png", self.bot.screenshot())
-                    time.sleep(2.0)
-                    if not _tap_template("btn_next_truck.png"):
-                        break
-                    time.sleep(1.5)
-                    continue
-
-                # Commit to fight
-                _dbg("  [truck_attack] power check passed — fighting")
+                # Fight — no power comparison, user targets a specific state and knows they can win
+                _dbg("  [truck_attack] tapping Fight")
                 if _tap_template("btn_other_truck_fight.png", self.bot.screenshot()):
                     _dbg("  [truck_attack] fight started — waiting 20s")
                     time.sleep(20.0)
