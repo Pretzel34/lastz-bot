@@ -1571,7 +1571,12 @@ class ActionExecutor:
             )
             raw = " ".join(r.text for r in results)
             self._log(f"  [truck_attack] state OCR: '{raw}'")
-            m = _re.search(r"#\s*(\d{1,4})", raw)
+            # Primary: "#NNN" — also accept common OCR misreads of '#' (H, 4, &, *)
+            m = _re.search(r"[#H4&*]\s*(\d{1,4})", raw)
+            if m:
+                return m.group(1)
+            # Fallback: first standalone 3-4 digit number in the header line
+            m = _re.search(r"\b(\d{3,4})\b", raw)
             return m.group(1) if m else ""
 
         def _ocr_powers(ss):
