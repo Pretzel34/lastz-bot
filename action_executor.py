@@ -1660,22 +1660,6 @@ class ActionExecutor:
                 except Exception:
                     pass
 
-                _dbg(f"  [truck_attack] tapping Loot")
-                loot_ss    = self.bot.screenshot()
-                loot_match = self.vision.find_template(loot_ss, self._template_path("btn_other_truck_loot.png"))
-                if not loot_match:
-                    _dbg("  [truck_attack] Loot button not found — advancing")
-                    if not _tap_template("btn_next_truck.png"):
-                        break
-                    time.sleep(1.5)
-                    continue
-                self.bot.tap(loot_match.x, loot_match.y)
-                time.sleep(3.0)
-                try:
-                    self.bot.screenshot().save(str(_debug_log.parent / "post_loot.png"))
-                except Exception:
-                    pass
-
                 # Plunder
                 _dbg("  [truck_attack] tapping Plunder")
                 if not _tap_template("btn_other_truck_plunder.png"):
