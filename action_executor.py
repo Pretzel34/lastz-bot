@@ -1660,6 +1660,16 @@ class ActionExecutor:
                 except Exception:
                     pass
 
+                # Loot — opens the loot/attack detail screen where Plunder becomes visible
+                _dbg("  [truck_attack] tapping Loot")
+                if not _tap_template("btn_other_truck_loot.png"):
+                    _dbg("  [truck_attack] Loot button not found — advancing")
+                    if not _tap_template("btn_next_truck.png"):
+                        break
+                    time.sleep(1.5)
+                    continue
+                time.sleep(3.0)
+
                 # Plunder — try primary + alternates, pick best confidence
                 _PLUNDER_TMPLS = [
                     "btn_other_truck_plunder.png",
