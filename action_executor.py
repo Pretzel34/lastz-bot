@@ -1561,23 +1561,43 @@ class ActionExecutor:
                 val *= 1_000
             return val
 
+        _debug_log = Path("logs") / "truck_attack_debug.log"
+        _debug_log.parent.mkdir(exist_ok=True)
+
+        def _dbg(msg: str):
+            """Write directly to file AND to GUI — survives bot being closed quickly."""
+            self._log(msg)
+            try:
+                with open(_debug_log, "a", encoding="utf-8") as _f:
+                    from datetime import datetime as _dt
+                    _f.write(f"[{_dt.now():%H:%M:%S}] {msg}\n")
+            except Exception:
+                pass
+
         def _ocr_state(ss) -> str:
             """Return the state number string (e.g. '404') from the truck detail header."""
             w, h = ss.size
+            # Wide region — covers 1-22% of screen height so we don't miss the header
+            # regardless of emulator resolution or popup position
             results = self.vision.read_text(
                 ss,
-                region=(int(w * 0.05), int(h * 0.03), int(w * 0.90), int(h * 0.13)),
+                region=(int(w * 0.02), int(h * 0.01), int(w * 0.92), int(h * 0.22)),
                 min_confidence=0.3,
             )
             raw = " ".join(r.text for r in results)
-            self._log(f"  [truck_attack] state OCR: '{raw}'")
+            _dbg(f"  [truck_attack] state OCR raw: '{raw}'")
             # Primary: "#NNN" — also accept common OCR misreads of '#' (H, 4, &, *)
             m = _re.search(r"[#H4&*]\s*(\d{1,4})", raw)
             if m:
+                _dbg(f"  [truck_attack] state extracted (primary): '{m.group(1)}'")
                 return m.group(1)
             # Fallback: first standalone 3-4 digit number in the header line
             m = _re.search(r"\b(\d{3,4})\b", raw)
-            return m.group(1) if m else ""
+            if m:
+                _dbg(f"  [truck_attack] state extracted (fallback): '{m.group(1)}'")
+                return m.group(1)
+            _dbg("  [truck_attack] state OCR: no state number found")
+            return ""
 
         def _ocr_powers(ss):
             """Return (our_power, their_power) floats from the fight preview screen."""
@@ -1631,7 +1651,7 @@ class ActionExecutor:
             if self._stop_event and self._stop_event.is_set():
                 return self._ok(action, "execute_truck_attack: stop requested")
 
-            self._log(f"  [truck_attack] cycle {attempt + 1}/{max_attempts}")
+            _dbg(f"  [truck_attack] cycle {attempt + 1}/{max_attempts}")
 
             for slot in range(12):
                 if self._stop_event and self._stop_event.is_set():
@@ -1639,11 +1659,11 @@ class ActionExecutor:
 
                 ss    = self.bot.screenshot()
                 state = _ocr_state(ss)
-                self._log(f"  [truck_attack] slot {slot + 1}/12 — state='{state}' target='{target_state}'")
+                _dbg(f"  [truck_attack] slot {slot + 1}/12 — state='{state}' target='{target_state}'")
 
                 # Skip trucks we already chose not to fight
                 if state and state in skip_set:
-                    self._log(f"  [truck_attack] '{state}' in skip list — advancing")
+                    _dbg(f"  [truck_attack] '{state}' in skip list — advancing")
                     if not _tap_template("btn_next_truck.png"):
                         break
                     time.sleep(1.5)
@@ -1651,7 +1671,7 @@ class ActionExecutor:
 
                 # Apply state filter
                 if target_state and state != target_state:
-                    self._log(f"  [truck_attack] state mismatch '{state}' — advancing")
+                    _dbg(f"  [truck_attack] state mismatch '{state}' — advancing")
                     if not _tap_template("btn_next_truck.png"):
                         break
                     time.sleep(1.5)
