@@ -29,7 +29,7 @@
     {
       "action": "if_template_tap",
       "template": "btn_quick_deploy.png",
-      "skip_task_if_not_found": true,
+      "required": false,
       "log_success": "Quick deploy tapped"
     },
     {

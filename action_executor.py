@@ -1461,6 +1461,36 @@ class ActionExecutor:
                 if go_match:
                     self.bot.tap(go_match.x, go_match.y)
                     return self._ok(action, f"check_truck_quality: matched '{matched}' — truck sent")
+                # GO not visible — check if formation needs to be saved first
+                escort_path = self._template_path("btn_deploy_escort_truck.png")
+                escort_match = self.vision.find_template(go_screenshot, escort_path)
+                if escort_match:
+                    self.log_callback and self.log_callback(
+                        "  [check_truck_quality] Formation not saved — running save sequence")
+                    self.bot.tap(escort_match.x, escort_match.y)
+                    time.sleep(4.0)
+                    sel_path = self._template_path("btn_select_all_unit_truck.png")
+                    sel_ss = self.bot.screenshot()
+                    sel_match = self.vision.find_template(sel_ss, sel_path)
+                    if sel_match:
+                        self.bot.tap(sel_match.x, sel_match.y)
+                    time.sleep(4.0)
+                    save_path = self._template_path("btn_save_formation_truck.png")
+                    save_ss = self.bot.screenshot()
+                    save_match = self.vision.find_template(save_ss, save_path)
+                    if save_match:
+                        self.bot.tap(save_match.x, save_match.y)
+                    time.sleep(4.0)
+                    # Retry GO button after saving formation
+                    go_ss2 = self.bot.screenshot()
+                    go_match2 = self.vision.find_template(go_ss2, go_path)
+                    if go_match2:
+                        self.bot.tap(go_match2.x, go_match2.y)
+                        return self._ok(action,
+                            f"check_truck_quality: matched '{matched}' — formation saved, truck sent")
+                    self.log_callback and self.log_callback(
+                        "  [check_truck_quality] btn_truck_go still not visible after save — skipping")
+                    return self._ok(action, "check_truck_quality: GO not found after save sequence — skipping")
                 self.log_callback and self.log_callback(
                     "  [check_truck_quality] btn_truck_go not visible — skipping send")
                 return self._ok(action, "check_truck_quality: GO button not found — skipping")
