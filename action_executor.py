@@ -1561,7 +1561,8 @@ class ActionExecutor:
                 val *= 1_000
             return val
 
-        _debug_log = Path("logs") / "truck_attack_debug.log"
+        from pathlib import Path as _Path
+        _debug_log = _Path("logs") / "truck_attack_debug.log"
         _debug_log.parent.mkdir(exist_ok=True)
 
         def _dbg(msg: str):
