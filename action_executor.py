@@ -1578,21 +1578,22 @@ class ActionExecutor:
         def _ocr_state(ss) -> str:
             """Return the state number string (e.g. '404') from the truck detail header."""
             w, h = ss.size
-            # Wide region — covers 1-22% of screen height so we don't miss the header
-            # regardless of emulator resolution or popup position
+            # The truck detail popup header sits in the middle portion of the screen
+            # (roughly 20-55% of height). The top strip only shows list-view UI text.
             results = self.vision.read_text(
                 ss,
-                region=(int(w * 0.02), int(h * 0.01), int(w * 0.92), int(h * 0.22)),
+                region=(int(w * 0.02), int(h * 0.20), int(w * 0.92), int(h * 0.55)),
                 min_confidence=0.3,
             )
             raw = " ".join(r.text for r in results)
             _dbg(f"  [truck_attack] state OCR raw: '{raw}'")
-            # Primary: "#NNN" — also accept common OCR misreads of '#' (H, 4, &, *)
-            m = _re.search(r"[#H4&*]\s*(\d{1,4})", raw)
+            # Primary: "#NNN" — also accept common OCR misreads of '#' (H, &)
+            # * intentionally excluded: it matches in-game chat scores like "*50"
+            m = _re.search(r"[#H&]\s*(\d{1,4})", raw)
             if m:
                 _dbg(f"  [truck_attack] state extracted (primary): '{m.group(1)}'")
                 return m.group(1)
-            # Fallback: first standalone 3-4 digit number in the header line
+            # Fallback: first standalone 3-4 digit number (state numbers are always 3-4 digits)
             m = _re.search(r"\b(\d{3,4})\b", raw)
             if m:
                 _dbg(f"  [truck_attack] state extracted (fallback): '{m.group(1)}'")
