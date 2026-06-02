@@ -1645,14 +1645,6 @@ class ActionExecutor:
                 state = _ocr_state(ss)
                 _dbg(f"  [truck_attack] slot {slot + 1}/12 — state='{state}' target='{target_state}'")
 
-                # Skip trucks we already chose not to fight
-                if state and state in skip_set:
-                    _dbg(f"  [truck_attack] '{state}' in skip list — advancing")
-                    if not _tap_template("btn_next_truck.png"):
-                        break
-                    time.sleep(1.5)
-                    continue
-
                 # Apply state filter
                 if target_state and state != target_state:
                     _dbg(f"  [truck_attack] state mismatch '{state}' — advancing")
