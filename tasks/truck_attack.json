@@ -1,5 +1,6 @@
 {
   "name": "truck_attack",
+  "loop": true,
   "actions": [
     {
       "action": "if_template_tap",

@@ -1553,17 +1553,23 @@ class ActionExecutor:
         _debug_log.parent.mkdir(exist_ok=True)
 
         def _parse_power(text: str) -> float:
+            # Return the LARGEST numeric value found — power (millions) always
+            # dominates state numbers (3-4 digits) that share the same OCR band.
             t = text.replace(",", "").replace(" ", "")
-            m = _re.search(r"([\d.]+)\s*([KkMm]?)", t)
-            if not m:
-                return 0.0
-            val = float(m.group(1))
-            sfx = m.group(2).upper()
-            if sfx == "M":
-                val *= 1_000_000
-            elif sfx == "K":
-                val *= 1_000
-            return val
+            best = 0.0
+            for num_str, sfx in _re.findall(r"([\d.]+)([KkMm]?)", t):
+                try:
+                    val = float(num_str)
+                except ValueError:
+                    continue
+                sfx = sfx.upper()
+                if sfx == "M":
+                    val *= 1_000_000
+                elif sfx == "K":
+                    val *= 1_000
+                if val > best:
+                    best = val
+            return best
 
         def _dbg(msg: str):
             """Write directly to file AND to GUI — survives bot being closed quickly."""
@@ -1577,8 +1583,8 @@ class ActionExecutor:
 
         _ocr_save_counter = [0]  # mutable counter accessible inside nested function
 
-        def _ocr_state(ss) -> str:
-            """Return the state number string (e.g. '404') from the truck detail header."""
+        def _ocr_state(ss) -> tuple:
+            """Return (state_number_str, raw_ocr_text) from the truck detail header."""
             w, h = ss.size
             x1, y1 = int(w * 0.02), int(h * 0.57)
             x2, y2 = int(w * 0.92), int(h * 0.75)
@@ -1596,12 +1602,12 @@ class ActionExecutor:
             m = _re.search(r"[#H&]\s*(\d{1,4})", raw)
             if m:
                 _dbg(f"  [truck_attack] state extracted (primary): '{m.group(1)}'")
-                return m.group(1)
+                return m.group(1), raw
             # Fallback: first standalone 3-4 digit number (state numbers are always 3-4 digits)
             m = _re.search(r"\b(\d{3,4})\b", raw)
             if m:
                 _dbg(f"  [truck_attack] state extracted (fallback): '{m.group(1)}'")
-                return m.group(1)
+                return m.group(1), raw
             _dbg("  [truck_attack] state OCR: no state number found")
             # Save the full screenshot + cropped region so we can see what the bot sees
             _ocr_save_counter[0] += 1
@@ -1614,7 +1620,12 @@ class ActionExecutor:
                     _dbg(f"  [truck_attack] saved ocr_full_{_idx}.png and ocr_region_{_idx}.png")
                 except Exception as _e:
                     _dbg(f"  [truck_attack] screenshot save failed: {_e}")
-            return ""
+            return "", raw
+
+        def _extract_name(raw: str) -> str:
+            """Extract player name (between Lv.NN and power number) from truck OCR text."""
+            m = _re.search(r'Lv\.\d+\s*(.+?)\s+[\d,]{5,}', raw)
+            return m.group(1).strip() if m else ""
 
         def _tap_template(tmpl_name, screenshot=None) -> bool:
             if screenshot is None:
@@ -1644,6 +1655,11 @@ class ActionExecutor:
                 message="execute_truck_attack: no truck icons visible",
             )
 
+        if not hasattr(self, "_truck_attack_skip_names"):
+            self._truck_attack_skip_names = set()
+        if not hasattr(self, "_truck_attack_count"):
+            self._truck_attack_count = 0
+
         for attempt in range(max_attempts):
             if self._stop_event and self._stop_event.is_set():
                 return self._ok(action, "execute_truck_attack: stop requested")
@@ -1654,13 +1670,22 @@ class ActionExecutor:
                 if self._stop_event and self._stop_event.is_set():
                     return self._ok(action, "execute_truck_attack: stop requested")
 
-                ss    = self.bot.screenshot()
-                state = _ocr_state(ss)
+                ss             = self.bot.screenshot()
+                state, _raw    = _ocr_state(ss)
+                player_name    = _extract_name(_raw)
                 _dbg(f"  [truck_attack] slot {slot + 1}/12 — state='{state}' target='{target_state}'")
 
                 # Apply state filter
                 if target_state and state != target_state:
                     _dbg(f"  [truck_attack] state mismatch '{state}' — advancing")
+                    if not _tap_template("btn_next_truck.png"):
+                        break
+                    time.sleep(1.5)
+                    continue
+
+                # Skip players we already know we can't beat
+                if player_name and player_name in self._truck_attack_skip_names:
+                    _dbg(f"  [truck_attack] skipping '{player_name}' (outmatched previously)")
                     if not _tap_template("btn_next_truck.png"):
                         break
                     time.sleep(1.5)
@@ -1684,39 +1709,119 @@ class ActionExecutor:
                 time.sleep(3.0)
 
                 # Plunder — try primary + alternates, pick best confidence
+                # Extra second to let the world-map screen fully render after Loot
+                time.sleep(1.0)
                 _PLUNDER_TMPLS = [
-                    "btn_other_truck_plunder.png",
+                    "btn_other_truck_plunder_world.png",  # fresh crop from world-map view
                     "btn_other_trucks_plunder_alt.png",
-                    "btn_other_trucks_plunder_alt_1.png",
                     "btn_other_trucks_plunder_alt_2.png",
+                    "btn_other_truck_plunder.png",
+                    "btn_other_trucks_plunder_alt_1.png",
                 ]
-                plunder_ss    = self.bot.screenshot()
+                plunder_ss = self.bot.screenshot()
+                _pw, _ph = plunder_ss.size
+                # Search 45-100% height so the Plunder badge (~y=520-660 on 960px screen)
+                # is fully captured. x capped at 80% to skip right-side nav buttons.
+                _plunder_region = (int(_pw * 0.05), int(_ph * 0.45), int(_pw * 0.80), _ph)
                 try:
                     plunder_ss.save(str(_debug_log.parent / "plunder_screen.png"))
                 except Exception:
                     pass
+
+                # Build annotated copy for visual debugging
+                try:
+                    from PIL import ImageDraw as _IDraw
+                    _ann = plunder_ss.copy()
+                    _ann_draw = _IDraw.Draw(_ann)
+                    # Draw the search region boundary
+                    _ann_draw.rectangle(
+                        [_plunder_region[0], _plunder_region[1],
+                         _plunder_region[2], _plunder_region[3]],
+                        outline="blue", width=2,
+                    )
+                except Exception:
+                    _ann = _ann_draw = None
+
                 plunder_match = None
                 for _pt in _PLUNDER_TMPLS:
-                    _m = self.vision.find_template(plunder_ss, self._template_path(_pt), threshold=0.3)
+                    _m = self.vision.find_template(
+                        plunder_ss, self._template_path(_pt),
+                        threshold=0.3, region=_plunder_region,
+                    )
                     _c = getattr(_m, "confidence", 0)
-                    _dbg(f"  [truck_attack] Plunder '{_pt}' conf={_c:.3f} found={bool(_m)}")
+                    _mx, _my = getattr(_m, "x", 0), getattr(_m, "y", 0)
+                    _dbg(f"  [truck_attack] Plunder '{_pt}' conf={_c:.3f} found={bool(_m)} xy=({_mx},{_my})")
+                    if _m and _ann_draw:
+                        _col = "green" if _c >= 0.5 else ("yellow" if _c >= 0.4 else "red")
+                        _ann_draw.ellipse([_mx-18, _my-18, _mx+18, _my+18], outline=_col, width=3)
+                        _ann_draw.text((_mx+20, _my-10), f"{_pt[:22]} {_c:.2f}", fill=_col)
                     if _m and (plunder_match is None or _c > getattr(plunder_match, "confidence", 0)):
                         plunder_match = _m
+
+                try:
+                    if _ann:
+                        _ann.save(str(_debug_log.parent / "plunder_annotated.png"))
+                except Exception:
+                    pass
+
                 if not plunder_match:
-                    _dbg("  [truck_attack] Plunder button not found — backing off")
+                    _dbg("  [truck_attack] Plunder button not found in region — backing off")
                     _tap_template("btn_back.png", self.bot.screenshot())
                     time.sleep(2.0)
                     if not _tap_template("btn_next_truck.png"):
                         break
                     time.sleep(1.5)
                     continue
-                _dbg(f"  [truck_attack] tapping Plunder at ({plunder_match.x}, {plunder_match.y})")
+                _dbg(f"  [truck_attack] tapping Plunder at ({plunder_match.x},{plunder_match.y}) conf={getattr(plunder_match,'confidence',0):.3f}")
                 self.bot.tap(plunder_match.x, plunder_match.y)
-                time.sleep(3.0)
+                # Wait for the pre-fight formation screen to fully render
+                time.sleep(4.0)
 
-                # Fight button — opens the battle screen where both powers are shown
-                _dbg("  [truck_attack] tapping Fight")
-                if not _tap_template("btn_other_truck_fight.png", self.bot.screenshot()):
+                # Power check BEFORE tapping Fight — fight starts immediately on Fight tap
+                # with no confirmation screen, so this is the only safe moment to back off.
+                pre_fight_ss = self.bot.screenshot()
+                try:
+                    pre_fight_ss.save(str(_debug_log.parent / "pre_fight_screen.png"))
+                except Exception:
+                    pass
+                w, h = pre_fight_ss.size
+                # Read abbreviated M-values from the top header bar (e.g. "3.77M" / "12.55M").
+                # Same band that shows cleanly in fight_screen.png — should also appear here.
+                left_raw  = " ".join(r.text for r in self.vision.read_text(
+                    pre_fight_ss, region=(int(w*0.10), int(h*0.01), int(w*0.45), int(h*0.08)), min_confidence=0.3))
+                right_raw = " ".join(r.text for r in self.vision.read_text(
+                    pre_fight_ss, region=(int(w*0.55), int(h*0.01), int(w*0.90), int(h*0.08)), min_confidence=0.3))
+                our_pw    = _parse_power(left_raw)
+                their_pw  = _parse_power(right_raw)
+                _dbg(f"  [truck_attack] PRE-fight power check — ours={our_pw:,.0f} theirs={their_pw:,.0f}")
+                _dbg(f"  [truck_attack] PRE-fight OCR left='{left_raw}'  right='{right_raw}'")
+
+                # Back off if OCR failed to read either side — never fight blind
+                if our_pw == 0 or their_pw == 0:
+                    _dbg("  [truck_attack] power OCR failed (one or both sides = 0) — backing off, restarting scan")
+                    if player_name:
+                        self._truck_attack_skip_names.add(player_name)
+                        _dbg(f"  [truck_attack] added '{player_name}' to skip list (OCR fail — {len(self._truck_attack_skip_names)} skipped)")
+                    _tap_template("btn_back.png", pre_fight_ss)
+                    time.sleep(2.0)
+                    _tap_template("btn_back.png", self.bot.screenshot())
+                    time.sleep(2.0)
+                    break  # restart scan from slot 1
+
+                if their_pw > our_pw:
+                    _dbg("  [truck_attack] outmatched — backing off, restarting scan")
+                    if player_name:
+                        self._truck_attack_skip_names.add(player_name)
+                        _dbg(f"  [truck_attack] added '{player_name}' to skip list ({len(self._truck_attack_skip_names)} skipped total)")
+                    _tap_template("btn_back.png", pre_fight_ss)
+                    time.sleep(2.0)
+                    _tap_template("btn_back.png", self.bot.screenshot())
+                    time.sleep(2.0)
+                    break  # restart scan from slot 1
+
+                # Power ok — now tap Fight (commits immediately, no confirmation)
+                _dbg("  [truck_attack] power ok — tapping Fight")
+                if not _tap_template("btn_other_truck_fight.png", pre_fight_ss):
                     _dbg("  [truck_attack] Fight button not visible — backing off")
                     _tap_template("btn_back.png", self.bot.screenshot())
                     time.sleep(2.0)
@@ -1725,41 +1830,36 @@ class ActionExecutor:
                     time.sleep(1.5)
                     continue
 
-                # Power check on the battle screen before committing to fight
                 time.sleep(2.0)
                 fight_ss = self.bot.screenshot()
                 try:
                     fight_ss.save(str(_debug_log.parent / "fight_screen.png"))
                 except Exception:
                     pass
-                w, h = fight_ss.size
-                left_raw  = " ".join(r.text for r in self.vision.read_text(
-                    fight_ss, region=(int(w*0.05), int(h*0.10), int(w*0.45), int(h*0.35)), min_confidence=0.3))
-                right_raw = " ".join(r.text for r in self.vision.read_text(
-                    fight_ss, region=(int(w*0.55), int(h*0.10), int(w*0.95), int(h*0.35)), min_confidence=0.3))
-                our_pw    = _parse_power(left_raw)
-                their_pw  = _parse_power(right_raw)
-                _dbg(f"  [truck_attack] power check — ours={our_pw:,.0f} theirs={their_pw:,.0f}")
-                _dbg(f"  [truck_attack] power OCR left='{left_raw}'  right='{right_raw}'")
 
-                if their_pw > 0 and their_pw > our_pw:
-                    _dbg("  [truck_attack] outmatched — backing off")
-                    _tap_template("btn_back.png", fight_ss)
-                    time.sleep(2.0)
-                    if not _tap_template("btn_next_truck.png"):
-                        break
-                    time.sleep(1.5)
-                    continue
-
-                # Commit to fight
-                _dbg("  [truck_attack] power ok — tapping Fight Continue")
-                _tap_template("btn_other_truck_fight_cont.png")
+                _dbg("  [truck_attack] fight started — tapping Fight Continue")
+                _tap_template("btn_other_truck_fight_cont.png", fight_ss)
                 time.sleep(20.0)
-                return self._ok(action, f"execute_truck_attack: fight complete (state={state})")
+                self._truck_attack_count += 1
+                _dbg(f"  [truck_attack] fight complete ({self._truck_attack_count}/4) — navigating back")
+                _tap_template("btn_back.png", self.bot.screenshot())
+                time.sleep(1.5)
+                _tap_template("btn_back.png", self.bot.screenshot())
+                time.sleep(1.5)
+                if self._truck_attack_count >= 4:
+                    _dbg("  [truck_attack] 4 attacks complete — stopping loop")
+                    self._truck_attack_count = 0
+                    self._truck_attack_skip_names = set()
+                    return ActionResult(
+                        status=ActionStatus.ABORT_TASK,
+                        action=action,
+                        message=f"execute_truck_attack: 4 attacks complete (state={state})",
+                    )
+                break  # restart task from action 1 to attack again
 
-            # Exhausted 12 slots — refresh list for next cycle
+            # Inner loop ended (slots exhausted or break after fight/back-off) — refresh for next cycle
             if attempt < max_attempts - 1:
-                _dbg("  [truck_attack] 12 slots scanned — refreshing truck list")
+                _dbg("  [truck_attack] refreshing truck list for next cycle")
                 if not _tap_template("btn_other_truck_refresh.png"):
                     _dbg("  [truck_attack] refresh button not found — stopping")
                     break

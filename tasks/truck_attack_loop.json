@@ -1,0 +1,11 @@
+{
+  "name": "truck_attack_loop",
+  "actions": [
+    {
+      "action": "loop_task",
+      "task": "truck_attack.json",
+      "max_iterations": 20,
+      "note": "Restarts truck_attack.json from action 1 until 4 attacks complete (ABORT_TASK)"
+    }
+  ]
+}

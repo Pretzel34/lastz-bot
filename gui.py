@@ -2309,8 +2309,13 @@ class BotApp(ctk.CTk):
                         with open(atk_file) as f:
                             data = _json.load(f)
                         actions = data.get("actions", data) if isinstance(data, dict) else data
-                        tasks.append({"name": "Truck Attack", "actions": actions,
-                                      "farm_settings": {"trucks": trucks_cfg}})
+                        _atk_task = {"name": "Truck Attack", "actions": actions,
+                                     "farm_settings": {"trucks": trucks_cfg}}
+                        if isinstance(data, dict) and data.get("loop"):
+                            _atk_task["loop"] = True
+                            if "max_loop_iterations" in data:
+                                _atk_task["max_loop_iterations"] = data["max_loop_iterations"]
+                        tasks.append(_atk_task)
                         self._log(f"  ✓ Truck Attack — {len(actions)} actions", "info")
                     except Exception as e:
                         self._log(f"  ✗ Failed to load truck_attack.json: {e}", "error")

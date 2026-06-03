@@ -435,67 +435,79 @@ class BotEngine:
         return all_ok
 
     def _run_task(self, task: dict) -> bool:
-        name = task.get("name", "unnamed")
-        actions = task.get("actions", [])
+        name        = task.get("name", "unnamed")
+        actions     = task.get("actions", [])
+        loop        = task.get("loop", False)
+        max_loop    = int(task.get("max_loop_iterations", 50))
 
         self._log(f"▶▶ Task: {name} ({len(actions)} actions)")
 
-        i = 0
-        task_restarts = 0
-        while i < len(actions):
-            action = actions[i]
+        loop_iteration = 0
+        while True:
+            loop_iteration += 1
+            if loop and loop_iteration > 1:
+                self._log(f"  🔁 Task '{name}' — restarting (iteration {loop_iteration})")
 
-            if self._stop_event.is_set():
-                return False
+            i = 0
+            task_restarts = 0
+            while i < len(actions):
+                action = actions[i]
 
-            # Pause support
-            self._pause_event.wait()
-
-            self.current_action_index = i
-            result = self._run_action_with_retry(action)
-            self.stats.actions_run += 1
-
-            if result.status == ActionStatus.RESTART_TASK:
-                if task_restarts < 1:
-                    task_restarts += 1
-                    self._log(f"  🔄 Restarting task '{name}' from step 1 after reconnect")
-                    i = 0
-                    continue
-                else:
-                    self._log(f"  ⚠ Reconnect during task '{name}' — already restarted once, continuing from current step")
-
-            if result.status == ActionStatus.SUCCESS:
-                self.stats.actions_succeeded += 1
-            elif result.status == ActionStatus.SKIPPED:
-                self.stats.actions_skipped += 1
-            elif result.status == ActionStatus.ABORT_TASK:
-                # Graceful skip — not a failure, just nothing to do
-                self.stats.actions_skipped += 1
-                self.stats.tasks_completed += 1
-                self._log(f"  ⏭ Task '{name}' skipped: {result.message}")
-                return True
-            elif result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT):
-                self.stats.actions_failed += 1
-                self.stats.errors.append(
-                    f"[{name}] action {i}: {result.message}"
-                )
-                if action.get("required", True):
-                    self._log(f"Required action failed — aborting task '{name}'")
-                    self.stats.tasks_failed += 1
-                    if self.on_action_complete:
-                        self.on_action_complete(action, False)
+                if self._stop_event.is_set():
                     return False
 
-            if self.on_action_complete:
-                self.on_action_complete(action, bool(result))
-            if self.on_stats_update:
-                self.on_stats_update(self.stats)
+                # Pause support
+                self._pause_event.wait()
 
-            if result.skip_to is not None:
-                self._log(f"  ⏩ Skipping to step {result.skip_to + 1}")
-                i = result.skip_to
-            else:
-                i += 1
+                self.current_action_index = i
+                result = self._run_action_with_retry(action)
+                self.stats.actions_run += 1
+
+                if result.status == ActionStatus.RESTART_TASK:
+                    if task_restarts < 1:
+                        task_restarts += 1
+                        self._log(f"  🔄 Restarting task '{name}' from step 1 after reconnect")
+                        i = 0
+                        continue
+                    else:
+                        self._log(f"  ⚠ Reconnect during task '{name}' — already restarted once, continuing from current step")
+
+                if result.status == ActionStatus.SUCCESS:
+                    self.stats.actions_succeeded += 1
+                elif result.status == ActionStatus.SKIPPED:
+                    self.stats.actions_skipped += 1
+                elif result.status == ActionStatus.ABORT_TASK:
+                    # Graceful end — for looping tasks this means the loop is done
+                    self.stats.actions_skipped += 1
+                    self.stats.tasks_completed += 1
+                    self._log(f"  ⏭ Task '{name}' {'loop done' if loop else 'skipped'}: {result.message}")
+                    return True
+                elif result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT):
+                    self.stats.actions_failed += 1
+                    self.stats.errors.append(
+                        f"[{name}] action {i}: {result.message}"
+                    )
+                    if action.get("required", True):
+                        self._log(f"Required action failed — aborting task '{name}'")
+                        self.stats.tasks_failed += 1
+                        if self.on_action_complete:
+                            self.on_action_complete(action, False)
+                        return False
+
+                if self.on_action_complete:
+                    self.on_action_complete(action, bool(result))
+                if self.on_stats_update:
+                    self.on_stats_update(self.stats)
+
+                if result.skip_to is not None:
+                    self._log(f"  ⏩ Skipping to step {result.skip_to + 1}")
+                    i = result.skip_to
+                else:
+                    i += 1
+
+            # All actions ran — loop back to action 1 if looping, otherwise finish
+            if not loop or loop_iteration >= max_loop:
+                break
 
         self.stats.tasks_completed += 1
         self._log(f"✓ Task '{name}' complete")
