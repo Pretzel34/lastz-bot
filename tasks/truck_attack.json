@@ -3,6 +3,10 @@
   "loop": true,
   "actions": [
     {
+      "action": "skip_if_done_today",
+      "task_key": "truck_attack"
+    },
+    {
       "action": "if_template_tap",
       "template": "btn_truck_icon.png",
       "required": false

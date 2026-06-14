@@ -441,6 +441,7 @@ class BotEngine:
         max_loop    = int(task.get("max_loop_iterations", 50))
 
         self._log(f"▶▶ Task: {name} ({len(actions)} actions)")
+        self._dismiss_ads()
 
         loop_iteration = 0
         while True:
@@ -517,6 +518,49 @@ class BotEngine:
         msg = message.lower()
         return "not found" in msg and ("device" in msg or "127.0.0.1" in msg)
 
+    def _dismiss_ads(self):
+        """Try to dismiss any visible ad overlays before recovery."""
+        import json as _json
+        from pathlib import Path
+        dismiss_path = get_resource_dir() / "tasks" / "dismiss_ads.json"
+        if not dismiss_path.exists():
+            return
+        try:
+            data = _json.loads(dismiss_path.read_text(encoding="utf-8"))
+            actions = data.get("actions", []) if isinstance(data, dict) else data
+            for sub_action in actions:
+                self.executor.execute(sub_action)
+        except Exception as e:
+            self._log(f"  ⚠ dismiss_ads failed: {e}")
+
+    _GAME_PACKAGE = "com.readygo.barrel.gp"
+
+    def _ensure_app_focus(self):
+        """If Last Z is not the foreground app, dismiss the intruder and return to the game."""
+        try:
+            focus_info = self.bot.get_foreground_app()
+            if self._GAME_PACKAGE in focus_info:
+                return
+
+            self._log(f"  ⚠ Last Z not in focus — pressing BACK to dismiss overlay")
+            self.bot.press_back()
+            time.sleep(1.5)
+
+            focus_info = self.bot.get_foreground_app()
+            if self._GAME_PACKAGE in focus_info:
+                self._log("  ✓ Last Z back in focus")
+                return
+
+            # Still not in focus — force-stop Play Store then relaunch the game
+            self._log("  ⚠ Still not in focus — force-stopping Play Store and relaunching Last Z")
+            self.bot.stop_app("com.android.vending")
+            time.sleep(1.0)
+            self.bot.launch_app(self._GAME_PACKAGE)
+            time.sleep(5.0)
+            self._log("  ✓ Last Z relaunched")
+        except Exception as e:
+            self._log(f"  ⚠ focus check failed: {e}")
+
     def _recover_view(self):
         """
         Error recovery — determine current view state and navigate back to HQ.
@@ -526,6 +570,8 @@ class BotEngine:
                                    cycle world→HQ to recenter camera
         """
         self._log("  🔄 Recovery: checking view state...")
+        self._dismiss_ads()
+        self._ensure_app_focus()
         try:
             self.executor.execute({
                 "action":     "ensure_hq_view",

@@ -129,6 +129,27 @@
       "seconds": 3.0
     },
     {
+      "action": "if_template_tap",
+      "template": "btn_rally_reward.png",
+      "required": false,
+      "x_pct": 52.6,
+      "y_pct": 73.9,
+      "note": "Collect Rally Reward"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_post_rally_reward_claim.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
       "action": "tap_template_or_zone",
       "template": "btn_back_out_of_page.png",
       "x_pct": 6.3,

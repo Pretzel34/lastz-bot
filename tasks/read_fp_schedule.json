@@ -1,0 +1,58 @@
+{
+  "name": "read_fp_schedule",
+  "actions": [
+    {
+      "action": "skip_if_done_today",
+      "task_key": "fp_schedule",
+      "note": "Skip if schedule already saved for today — no navigation needed"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_full_preparedness_entry.png",
+      "required": false,
+      "note": "Open the Full Preparedness panel"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_fp_calendar.png",
+      "required": false,
+      "note": "Open the Event Calendar within Full Preparedness"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "read_fp_schedule",
+      "note": "OCR the calendar — self-skips if fp_schedule.json already has today's data"
+    },
+    {
+      "action": "mark_done_today",
+      "task_key": "fp_schedule"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_close.png",
+      "required": false,
+      "note": "Close Event Calendar"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_close.png",
+      "required": false,
+      "note": "Close Full Preparedness panel"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    }
+  ]
+}

@@ -1892,6 +1892,46 @@ class BotApp(ctk.CTk):
                 else:
                     self.after(0, lambda: self._log("  ℹ No identify_resources.json found — skipping", "info"))
 
+                # Step 3c — read server time so daily-task skipping works
+                server_time_file = tasks_dir / "check_server_time.json"
+                if server_time_file.exists():
+                    try:
+                        with open(server_time_file) as _stf:
+                            _st_data = _json.load(_stf)
+                        _st_actions = (_st_data.get("actions", [])
+                                       if isinstance(_st_data, dict) else _st_data)
+                        self.after(0, lambda: self._log("  ▶ Reading server time...", "info"))
+                        for _act in _st_actions:
+                            if engine._stop_event.is_set():
+                                return
+                            executor.execute(_act)
+                        self.after(0, lambda: self._log("  ✓ Server time recorded", "success"))
+                    except Exception as _e:
+                        self.after(0, lambda err=_e: self._log(
+                            f"  ⚠ check_server_time error: {err}", "warn"))
+                else:
+                    self.after(0, lambda: self._log("  ℹ No check_server_time.json found — skipping", "info"))
+
+                # Step 3d — read Full Preparedness schedule (once per server day)
+                fp_sched_file = tasks_dir / "read_fp_schedule.json"
+                if fp_sched_file.exists():
+                    try:
+                        with open(fp_sched_file) as _fpf:
+                            _fp_data = _json.load(_fpf)
+                        _fp_actions = (_fp_data.get("actions", [])
+                                       if isinstance(_fp_data, dict) else _fp_data)
+                        self.after(0, lambda: self._log("  ▶ Reading Full Preparedness schedule...", "info"))
+                        for _act in _fp_actions:
+                            if engine._stop_event.is_set():
+                                return
+                            executor.execute(_act)
+                        self.after(0, lambda: self._log("  ✓ FP schedule ready", "success"))
+                    except Exception as _e:
+                        self.after(0, lambda err=_e: self._log(
+                            f"  ⚠ read_fp_schedule error: {err}", "warn"))
+                else:
+                    self.after(0, lambda: self._log("  ℹ No read_fp_schedule.json found — skipping", "info"))
+
                 # Step 4 — load tasks from JSON files and start
                 tasks = self._farm_to_tasks(farm)
                 if not tasks:

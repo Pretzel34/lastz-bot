@@ -228,6 +228,10 @@
     "loop_tasks": false,
     "loop_delay": 60.0,
     "screenshot_on_error": true,
-    "auto_arrange": true
+    "auto_arrange": true,
+    "maintenance": {
+      "enabled": true,
+      "cleanup_every_n_runs": 50
+    }
   }
 }

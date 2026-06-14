@@ -1,0 +1,9 @@
+{
+  "name": "army_expansion",
+  "actions": [
+    {
+      "action": "wait",
+      "seconds": 2.0
+    }
+  ]
+}

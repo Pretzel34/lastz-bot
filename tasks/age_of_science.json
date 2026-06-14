@@ -1,0 +1,9 @@
+{
+  "name": "age_of_science",
+  "actions": [
+    {
+      "action": "wait",
+      "seconds": 2.0
+    }
+  ]
+}

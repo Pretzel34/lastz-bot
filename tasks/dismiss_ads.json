@@ -1,0 +1,20 @@
+{
+  "name": "dismiss_ads",
+  "actions": [
+    {
+      "action": "if_template_tap",
+      "template": "btn_ad_close.png",
+      "required": false
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_ad_close_alt.png",
+      "required": false
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_ad_skip.png",
+      "required": false
+    }
+  ]
+}

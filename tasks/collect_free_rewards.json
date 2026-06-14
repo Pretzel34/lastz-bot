@@ -2,6 +2,10 @@
   "name": "collect_free_rewards",
   "actions": [
     {
+      "action": "skip_if_done_today",
+      "task_key": "collect_free_rewards"
+    },
+    {
       "action": "ensure_hq_view",
       "hq_btn": "btn_go_world.png",
       "world_btn": "btn_go_headquarters.png",
@@ -89,6 +93,10 @@
       "template": "btn_clear_message.png",
       "required": false,
       "note": "Clear any message popup"
+    },
+    {
+      "action": "mark_done_today",
+      "task_key": "collect_free_rewards"
     }
   ]
 }

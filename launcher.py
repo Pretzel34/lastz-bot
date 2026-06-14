@@ -530,6 +530,8 @@ class EmulatorLauncher:
 
     def _wait_for_game(self, bot, timeout: int = GAME_TIMEOUT) -> bool:
         """Wait for Last Z to finish loading by checking the foreground app."""
+        PLAY_STORE = "com.android.vending"
+        relaunched = False
         start = time.time()
         while time.time() - start < timeout:
             try:
@@ -539,6 +541,13 @@ class EmulatorLauncher:
                 if self.package in focus:
                     time.sleep(5)
                     return True
+                # Ad navigated to Play Store — close it and relaunch the game
+                if PLAY_STORE in focus and not relaunched:
+                    self._log("[Launcher] Play Store opened by ad — closing and relaunching Last Z")
+                    bot.shell(f"am force-stop {PLAY_STORE}")
+                    time.sleep(1.0)
+                    bot.launch_app(self.package, self.activity)
+                    relaunched = True
             except Exception:
                 pass
             time.sleep(3)

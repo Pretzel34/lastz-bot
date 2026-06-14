@@ -1,0 +1,91 @@
+{
+  "name": "hero_progression",
+  "actions": [
+    {
+      "action": "if_template_tap",
+      "template": "btn_enter_hero.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_template",
+      "template": "btn_upgrade_indicator.png",
+      "fallback_template": "btn_upgrade_indicator_alt.png",
+      "required": false,
+      "skip_to_on_found": 8
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 21.1,
+      "y_pct": 21.9,
+      "note": "First Displayed Hero"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "loop_until_template",
+      "any_of": [
+        "btn_upgrade_click.png"
+      ],
+      "max_iterations": 20,
+      "on_each": [
+        {
+          "action": "if_template_tap",
+          "template": "btn_click_next_hero.png",
+          "fallback_templates": [
+            "btn_click_next_hero_alt.png",
+            "btn_click_next_hero_alt_alt.png",
+            "btn_click_next_hero_alt_alt_alt.png"
+          ],
+          "required": false,
+          "skip_task_if_not_found": true,
+          "log_skip": "No upgradeable hero found \u00e2\u20ac\u201d ending hero progression"
+        },
+        {
+          "action": "wait",
+          "seconds": 2.0
+        }
+      ]
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_upgrade_click.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_hero_back.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_back_out_of_page.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "run_task",
+      "task": "fp_reward_collection.json"
+    }
+  ]
+}

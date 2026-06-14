@@ -1,0 +1,125 @@
+{
+  "name": "mod_vehicle_rally",
+  "actions": [
+    {
+      "action": "if_template_tap",
+      "template": "btn_fp_mod_vehicle_complete.png",
+      "required": false,
+      "finish_task_on_success": true,
+      "log_success": "Mod Vehicle objective complete — stopping rally loop"
+    },
+    {
+      "action": "rally_count_check",
+      "max_rallies": 10,
+      "note": "Override normal daily rally limit for this event"
+    },
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Navigate from HQ to world view — skip if already in world"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "check_formations_busy",
+      "slots": [
+        {"x_pct": 92.6, "y_pct": 51.0},
+        {"x_pct": 92.8, "y_pct": 56.9},
+        {"x_pct": 92.6, "y_pct": 62.5},
+        {"x_pct": 92.8, "y_pct": 68.0}
+      ],
+      "locked_template": "btn_fourth_formation_locked.png",
+      "note": "Abort early if all formation slots are occupied"
+    },
+    {
+      "action": "tap_template_or_zone",
+      "template": "btn_search_lens_icon.png",
+      "x_pct": 5.2,
+      "y_pct": 80.7,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_boomer.png",
+      "fallback_template": "btn_frostbane_boomer.png",
+      "skip_task_if_not_found": true,
+      "log_skip": "Boomer search panel not found — wrong screen, cancelling"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "adjust_boomer_level",
+      "setting": "rally.boomer_level",
+      "template_pattern": "btn_lvl_{value}_boomer.png",
+      "plus_template": "btn_plus_boomer.png",
+      "minus_template": "btn_subtract_boomer_lvl.png",
+      "min_level": 1,
+      "max_level": 60,
+      "max_attempts": 50,
+      "tap_delay": 3.0,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_search_boomer.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_team_up_boomer.png",
+      "fallback_template": "btn_team_up_boomer_alt.png",
+      "required": true
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_march_on_boomer.png",
+      "fallback_template": "btn_march_on_boomer_alt.png",
+      "fuel_template": "btn_out_of_fuel.png",
+      "required": false,
+      "log_skip": "Troops busy — march not available, skipping rally attempt",
+      "on_not_found": [
+        { "action": "if_template_tap", "template": "btn_back_out_of_page.png", "required": false },
+        { "action": "wait", "seconds": 2.0 },
+        { "action": "if_template_tap", "template": "btn_back_out_of_page.png", "required": false },
+        { "action": "wait", "seconds": 2.0 }
+      ]
+    },
+    {
+      "action": "rally_count_record"
+    },
+    {
+      "action": "wait",
+      "seconds": 6.0
+    }
+  ]
+}

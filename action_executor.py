@@ -77,7 +77,13 @@ class ActionExecutor:
         adjust_boomer_level      - detect boomer level and tap +/- to reach the setting target
         compare_resources        - OCR resource panel and compare two resource values (e.g. wood < food)
         read_resource_priority   - screenshot resource panel, rank by Total RSS ascending, save to logs/resource_priority.json
+        read_server_time         - OCR Apocalypse Time screen, save server date/time to logs/server_time.json
+        skip_if_done_today       - ABORT_TASK if task_key was already completed on today's server date for this farm
+        mark_done_today          - record task_key as completed on today's server date for this farm
+        read_fp_schedule         - OCR Full Preparedness Event Calendar and save today's time→task schedule (self-skips if already current)
+        dispatch_fp_task         - derive current server time, look up fp_schedule.json, run the matching child task
         loop_until_template      - run on_each actions repeatedly until any of the specified templates appears
+        run_task_if_template     - run a sub-task JSON only if an identifying template is visible; silently skips if not found
     """
 
     def __init__(
@@ -222,8 +228,16 @@ class ActionExecutor:
             "loop_until_template":      self._loop_until_template,
             "loop_while_template":      self._loop_while_template,
             "loop_task":                self._loop_task,
+            "run_task":                 self._run_task,
+            "run_task_if_template":     self._run_task_if_template,
             "check_truck_quality":      self._check_truck_quality,
             "execute_truck_attack":     self._execute_truck_attack,
+            "read_server_time":         self._read_server_time,
+            "skip_if_done_today":       self._skip_if_done_today,
+            "mark_done_today":          self._mark_done_today,
+            "skip_if_fp_cycle_current": self._skip_if_fp_cycle_current,
+            "read_fp_schedule":         self._read_fp_schedule,
+            "dispatch_fp_task":         self._dispatch_fp_task,
         }
 
         handler = handlers.get(action_type)
@@ -240,8 +254,16 @@ class ActionExecutor:
         y = action.get("y")
         if x is None or y is None:
             return self._fail(action, "tap requires 'x' and 'y'")
-        self.bot.tap(int(x), int(y))
+        self._do_tap(int(x), int(y))
         return self._ok(action, f"Tapped ({x}, {y})")
+
+    def _do_tap(self, x: int, y: int, count: int = 1):
+        """Tap count times. Use count=2 for buttons that the game sometimes drops."""
+        import time as _t
+        self.bot.tap(x, y)
+        for _ in range(count - 1):
+            _t.sleep(0.15)
+            self.bot.tap(x, y)
 
     def _screen_size(self):
         """Get live screen dimensions from a screenshot — always accurate."""
@@ -292,7 +314,7 @@ class ActionExecutor:
                 message=f"Template not found: {template}",
             )
 
-        self.bot.tap(match.x, match.y)
+        self._do_tap(match.x, match.y)
         return ActionResult(
             status=ActionStatus.SUCCESS,
             action=action,
@@ -312,7 +334,7 @@ class ActionExecutor:
         if not result:
             return self._fail(action, f"Text not found on screen: '{text}'")
 
-        self.bot.tap(result.x, result.y)
+        self._do_tap(result.x, result.y)
         return self._ok(action, f"Tapped text '{result.text}' at ({result.x}, {result.y})")
 
     def _swipe(self, action: dict) -> ActionResult:
@@ -930,10 +952,19 @@ class ActionExecutor:
                     break
 
         if match:
-            tap_x = match.x + int(action.get("tap_offset_x", 0))
-            tap_y = match.y + int(action.get("tap_offset_y", 0))
-            self.bot.tap(tap_x, tap_y)
-            msg = action.get("log_success", f"Found and tapped '{matched_template}'")
+            zone_x = action.get("tap_x_pct") if action.get("tap_x_pct") is not None else action.get("x_pct")
+            zone_y = action.get("tap_y_pct") if action.get("tap_y_pct") is not None else action.get("y_pct")
+            if zone_x is not None and zone_y is not None:
+                w, h = screenshot.size
+                tap_x = int(w * float(zone_x) / 100)
+                tap_y = int(h * float(zone_y) / 100)
+                default_msg = f"Found '{matched_template}' — tapping zone ({tap_x},{tap_y})"
+            else:
+                tap_x = match.x + int(action.get("tap_offset_x", 0))
+                tap_y = match.y + int(action.get("tap_offset_y", 0))
+                default_msg = f"Found and tapped '{matched_template}'"
+            self._do_tap(tap_x, tap_y)
+            msg = action.get("log_success", default_msg)
             if self.log_callback:
                 self.log_callback(f"  ✓ {msg}")
             return self._ok(action, msg)
@@ -963,7 +994,7 @@ class ActionExecutor:
                     path = self._template_path(tmpl)
                     retry_match = self.vision.find_template(screenshot2, path, threshold=threshold)
                     if retry_match:
-                        self.bot.tap(retry_match.x, retry_match.y)
+                        self._do_tap(retry_match.x, retry_match.y)
                         msg = action.get("log_success", f"Found and tapped '{tmpl}' after refuelling")
                         if self.log_callback:
                             self.log_callback(f"  ✓ {msg}")
@@ -989,6 +1020,9 @@ class ActionExecutor:
                 if self._stop_event and self._stop_event.is_set():
                     break
                 self.execute(sub)
+            # on_not_found_continue: true → keep running the parent task after fallback actions
+            if action.get("on_not_found_continue"):
+                return ActionResult(status=ActionStatus.SKIPPED, action=action, message=skip_msg)
             return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=skip_msg)
 
         if skip_task:
@@ -1291,6 +1325,522 @@ class ActionExecutor:
             _json.dump(out, f, indent=2)
 
         return self._ok(action, f"Priority saved: {' > '.join(priority)}")
+
+    # ------------------------------------------------------------------
+    # Server-time / daily task helpers
+    # ------------------------------------------------------------------
+
+    def _read_server_time(self, action: dict) -> ActionResult:
+        """
+        OCR the Apocalypse Time screen and persist the server date.
+
+        Reads two screen regions:
+          - Top-right calendar (for year-month "2026-6" and day "3")
+          - Center band (for time "14:19:02")
+
+        Saves logs/server_time.json and stores self._server_date for the session.
+        """
+        import re as _re
+        import json as _json
+        from datetime import datetime as _dt
+        from pathlib import Path as _Path
+
+        ss = self.bot.screenshot()
+        w, h = ss.size
+
+        cal_region  = (int(w * 0.60), int(h * 0.15), int(w * 0.92), int(h * 0.31))
+        time_region = (int(w * 0.20), int(h * 0.30), int(w * 0.80), int(h * 0.42))
+
+        cal_raw  = " ".join(r.text for r in self.vision.read_text(ss, region=cal_region,  min_confidence=0.3))
+        time_raw = " ".join(r.text for r in self.vision.read_text(ss, region=time_region, min_confidence=0.3))
+
+        if self.log_callback:
+            self.log_callback(f"  [server_time] cal='{cal_raw}'  time='{time_raw}'")
+
+        # Parse year-month from calendar, then find day immediately after
+        ym_m = _re.search(r'(\d{4})-(\d{1,2})', cal_raw)
+        server_date = None
+        if ym_m:
+            after_ym = cal_raw[ym_m.end():]
+            day_m = _re.search(r'\b(\d{1,2})\b', after_ym)
+            if day_m:
+                server_date = f"{ym_m.group(0)}-{day_m.group(1)}"
+
+        time_m = _re.search(r'(\d{1,2}:\d{2}:\d{2})', time_raw)
+        server_time = time_m.group(1) if time_m else ""
+
+        if not server_date or not server_time:
+            return self._fail(action,
+                f"read_server_time: could not parse date/time (cal='{cal_raw}' time='{time_raw}')")
+
+        now = _dt.now()
+        self._server_date        = server_date
+        self._server_time        = server_time        # "14:19:02"
+        self._server_recorded_at = now                # local datetime at recording
+
+        _Path("logs").mkdir(exist_ok=True)
+        out = {
+            "server_date":  server_date,
+            "server_time":  server_time,
+            "recorded_at":  now.isoformat(timespec="seconds"),
+        }
+        _Path("logs/server_time.json").write_text(_json.dumps(out, indent=2))
+
+        if self.log_callback:
+            self.log_callback(f"  [server_time] {server_date} {server_time} — saved")
+
+        return self._ok(action, f"read_server_time: {server_date} {server_time}")
+
+    def _skip_if_done_today(self, action: dict) -> ActionResult:
+        """
+        Return ABORT_TASK if task_key was already completed on today's server date for this farm.
+
+        Required:
+          task_key  - string key matching what mark_done_today used (e.g. "collect_free_rewards")
+
+        Reads logs/daily_completions.json, keyed by port → task_key → server_date.
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        task_key = action.get("task_key")
+        if not task_key:
+            return self._fail(action, "skip_if_done_today requires 'task_key'")
+
+        server_date = getattr(self, "_server_date", None)
+        if not server_date:
+            try:
+                p = _Path("logs/server_time.json")
+                if p.exists():
+                    server_date = _json.loads(p.read_text()).get("server_date")
+                    if server_date:
+                        self._server_date = server_date
+            except Exception:
+                pass
+
+        if not server_date:
+            if self.log_callback:
+                self.log_callback(f"  [daily] no server date — cannot skip '{task_key}', continuing")
+            return self._ok(action, f"skip_if_done_today: no server date — continuing")
+
+        farm_key = str(getattr(self.bot, "port", "default"))
+        comp_path = _Path("logs/daily_completions.json")
+        completions: dict = {}
+        if comp_path.exists():
+            try:
+                completions = _json.loads(comp_path.read_text())
+            except Exception:
+                pass
+
+        last_done = completions.get(farm_key, {}).get(task_key)
+        if last_done == server_date:
+            msg = f"'{task_key}' already done on {server_date} — skipping"
+            if self.log_callback:
+                self.log_callback(f"  ✅ [daily] {msg}")
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+
+        return self._ok(action, f"skip_if_done_today: '{task_key}' not yet done on {server_date}")
+
+    def _mark_done_today(self, action: dict) -> ActionResult:
+        """
+        Record that task_key was completed on today's server date for this farm.
+
+        Required:
+          task_key  - string key (e.g. "collect_free_rewards")
+
+        Writes/updates logs/daily_completions.json.
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        task_key = action.get("task_key")
+        if not task_key:
+            return self._fail(action, "mark_done_today requires 'task_key'")
+
+        server_date = getattr(self, "_server_date", None)
+        if not server_date:
+            if self.log_callback:
+                self.log_callback(f"  [daily] no server date — skipping mark for '{task_key}'")
+            return self._ok(action, "mark_done_today: no server date — skipping")
+
+        farm_key = str(getattr(self.bot, "port", "default"))
+        comp_path = _Path("logs/daily_completions.json")
+        completions: dict = {}
+        if comp_path.exists():
+            try:
+                completions = _json.loads(comp_path.read_text())
+            except Exception:
+                pass
+
+        comp_path.parent.mkdir(exist_ok=True)
+        completions.setdefault(farm_key, {})[task_key] = server_date
+        comp_path.write_text(_json.dumps(completions, indent=2))
+
+        if self.log_callback:
+            self.log_callback(f"  [daily] marked '{task_key}' done on {server_date} (farm:{farm_key})")
+
+        return self._ok(action, f"mark_done_today: '{task_key}' = {server_date}")
+
+    # ------------------------------------------------------------------
+    # Full Preparedness schedule helpers
+    # ------------------------------------------------------------------
+
+    def _skip_if_fp_cycle_current(self, action: dict) -> ActionResult:
+        """
+        ABORT_TASK if fp_schedule.json already holds data for today's ISO day number
+        within the current week. Runs daily — skips only once today's slot is captured.
+        """
+        import json as _json
+        from datetime import date as _date, timedelta as _td
+        from pathlib import Path as _Path
+
+        server_date = getattr(self, "_server_date", None)
+        if not server_date:
+            try:
+                p = _Path("logs/server_time.json")
+                if p.exists():
+                    server_date = _json.loads(p.read_text()).get("server_date")
+            except Exception:
+                pass
+
+        if server_date:
+            try:
+                parts = server_date.split("-")
+                sv_dt = _date(int(parts[0]), int(parts[1]), int(parts[2]))
+            except (ValueError, IndexError):
+                sv_dt = _date.today()
+        else:
+            sv_dt = _date.today()
+
+        today_day = str(sv_dt.isoweekday())
+        cycle_start = (sv_dt - _td(days=sv_dt.isoweekday() - 1)).isoformat()
+
+        sched_path = _Path("logs/fp_schedule.json")
+        if sched_path.exists():
+            try:
+                data = _json.loads(sched_path.read_text())
+                if (data.get("cycle_start_date") == cycle_start
+                        and data.get("days", {}).get(today_day)):
+                    msg = f"FP Day {today_day} already captured for week of {cycle_start} — skipping"
+                    if self.log_callback:
+                        self.log_callback(f"  ✅ [fp_cycle] {msg}")
+                    return ActionResult(
+                        status=ActionStatus.ABORT_TASK, action=action, message=msg)
+            except Exception:
+                pass
+
+        return self._ok(action,
+            f"skip_if_fp_cycle_current: Day {today_day} not yet captured — continuing")
+
+    # Maps OCR text (lowercase, stripped) → task filename stem
+    _FP_THEME_MAP = {
+        # Full phrases (preferred — most specific)
+        "hero progression":  "hero_progression",
+        "army expansion":    "army_expansion",
+        "age of science":    "age_of_science",
+        "mod vehicle boost": "mod_vehicle",
+        "mod vehicle":       "mod_vehicle",
+        "shelter upgrade":   "shelter_upgrade",
+        # Single-keyword fallbacks for partial/garbled OCR
+        "hero":     "hero_progression",
+        "army":     "army_expansion",
+        "science":  "age_of_science",
+        "shelter":  "shelter_upgrade",
+        "boost":    "mod_vehicle",
+        "mod":      "mod_vehicle",
+    }
+
+    def _read_fp_schedule(self, action: dict) -> ActionResult:
+        """
+        OCR the Full Preparedness calendar screen and save today's day schedule.
+
+        Reads the single day currently visible (the game shows today's day when the
+        calendar opens). Merges into logs/fp_schedule.json under that day's ISO key.
+
+        Output file: logs/fp_schedule.json
+          {
+            "cycle_start_date": "2026-06-01",
+            "recorded_at": "...",
+            "days": {
+              "3": { "00:00": "hero_progression", "04:00": "army_expansion", ... },
+              ...
+            }
+          }
+        """
+        import re as _re
+        import json as _json
+        from datetime import datetime as _dt, date as _date, timedelta as _td
+        from pathlib import Path as _Path
+
+        server_date = getattr(self, "_server_date", None)
+        if not server_date:
+            try:
+                p = _Path("logs/server_time.json")
+                if p.exists():
+                    server_date = _json.loads(p.read_text()).get("server_date")
+                    if server_date:
+                        self._server_date = server_date
+            except Exception:
+                pass
+
+        current_day_num: str | None = None
+        cycle_start_str: str | None = None
+        if server_date:
+            try:
+                parts = server_date.split("-")
+                sv_dt = _date(int(parts[0]), int(parts[1]), int(parts[2]))
+                current_day_num = str(sv_dt.isoweekday())  # Mon=1, Sun=7
+                cycle_start_str = (sv_dt - _td(days=sv_dt.isoweekday() - 1)).isoformat()
+            except (ValueError, IndexError):
+                pass
+        if not current_day_num:
+            # No server date — fall back to local date (same day in practice)
+            local_dt = _date.today()
+            current_day_num = str(local_dt.isoweekday())
+            cycle_start_str = (local_dt - _td(days=local_dt.isoweekday() - 1)).isoformat()
+
+        # OCR the current screen
+        ss = self.bot.screenshot()
+        ocr_results = self.vision.read_text(ss, min_confidence=0.2)
+
+        # Group items into rows by Y proximity
+        rows: list[list] = []
+        for item in sorted(ocr_results, key=lambda r: r.y):
+            placed = False
+            for row in rows:
+                if abs(item.y - row[0].y) <= 15:
+                    row.append(item)
+                    placed = True
+                    break
+            if not placed:
+                rows.append([item])
+
+        screen_day: str | None = None
+        slots: dict[str, str] = {}
+
+        for row in rows:
+            row_text = " ".join(r.text for r in sorted(row, key=lambda r: r.x)).strip()
+            if not row_text:
+                continue
+
+            # Identify day header
+            if screen_day is None:
+                day_m = _re.search(r'\bDay\s+(\d+)\b', row_text, _re.IGNORECASE)
+                if day_m:
+                    day_num = int(day_m.group(1))
+                    if 1 <= day_num <= 7:
+                        screen_day = str(day_num)
+                    continue
+                if _re.search(r'\bToday\b', row_text, _re.IGNORECASE) and current_day_num:
+                    screen_day = current_day_num
+                    continue
+                continue
+
+            # Parse time + theme slots under the header
+            time_m = _re.search(r'\b(\d{2}:\d{2})\b', row_text)
+            if not time_m:
+                continue
+            slot_time = time_m.group(1)
+            theme_raw = row_text.replace(slot_time, "").strip().lower()
+            task_name = self._FP_THEME_MAP.get(theme_raw)
+            if not task_name:
+                for k, v in self._FP_THEME_MAP.items():
+                    if k in theme_raw:
+                        task_name = v
+                        break
+            if task_name:
+                slots[slot_time] = task_name
+                if self.log_callback:
+                    self.log_callback(
+                        f"  [fp_schedule] Day {screen_day}  {slot_time} → {task_name}")
+            elif self.log_callback:
+                self.log_callback(
+                    f"  [fp_schedule] Day {screen_day}  {slot_time} — unknown theme: '{theme_raw}'")
+
+        # Fall back to server date if OCR missed the day header
+        if screen_day is None:
+            screen_day = current_day_num
+
+        if not screen_day:
+            return self._fail(action,
+                "read_fp_schedule: could not determine current day — check OCR or server_time.json")
+
+        # Load and merge into existing schedule
+        sched_path = _Path("logs/fp_schedule.json")
+        existing_data: dict = {}
+        if sched_path.exists():
+            try:
+                existing_data = _json.loads(sched_path.read_text())
+                # Migrate old single-day format
+                if "schedule" in existing_data and "days" not in existing_data:
+                    old = existing_data
+                    existing_data = {
+                        "cycle_start_date": old.get("cycle_start_date", ""),
+                        "recorded_at": old.get("recorded_at", ""),
+                        "days": {},
+                    }
+            except Exception:
+                existing_data = {}
+
+        existing_days: dict = existing_data.get("days", {})
+        existing_days[screen_day] = slots
+
+        _Path("logs").mkdir(exist_ok=True)
+        out = {
+            "cycle_start_date": cycle_start_str or existing_data.get("cycle_start_date", ""),
+            "recorded_at":      _dt.now().isoformat(timespec="seconds"),
+            "days":             {k: v for k, v in existing_days.items() if v},
+        }
+        sched_path.write_text(_json.dumps(out, indent=2))
+
+        if self.log_callback:
+            self.log_callback(
+                f"  [fp_schedule] saved Day {screen_day}, {len(slots)} slot(s) "
+                f"(week of {cycle_start_str})")
+
+        return self._ok(action,
+            f"read_fp_schedule: Day {screen_day}, {len(slots)} slot(s) saved")
+
+    def _dispatch_fp_task(self, action: dict) -> ActionResult:
+        """
+        Derive the current server time, look up the Full Preparedness schedule, and
+        run the matching child task.
+
+        Reads logs/fp_schedule.json and logs/server_time.json.  Uses elapsed local
+        time since server_time was recorded to estimate the current server time, so
+        no additional navigation is required.
+
+        Silently skips (SKIPPED) if no schedule file exists or the current slot
+        cannot be determined.
+        """
+        import re as _re
+        import json as _json
+        from datetime import datetime as _dt
+        from pathlib import Path as _Path
+
+        # ── Derive current server time ──────────────────────────────────
+        st_path = _Path("logs/server_time.json")
+        if not st_path.exists():
+            if self.log_callback:
+                self.log_callback("  [fp_dispatch] no server_time.json — skipping")
+            return ActionResult(status=ActionStatus.SKIPPED, action=action,
+                                message="dispatch_fp_task: no server time available")
+
+        try:
+            st = _json.loads(st_path.read_text())
+            sv_time_str  = st["server_time"]   # "14:19:02"
+            recorded_str = st["recorded_at"]    # local ISO
+        except Exception as e:
+            return self._fail(action, f"dispatch_fp_task: bad server_time.json — {e}")
+
+        h, m, s     = map(int, sv_time_str.split(":"))
+        sv_seconds  = h * 3600 + m * 60 + s
+
+        try:
+            recorded_at = _dt.fromisoformat(recorded_str)
+            elapsed     = (_dt.now() - recorded_at).total_seconds()
+        except Exception:
+            elapsed = 0
+
+        current_sv_seconds = sv_seconds + elapsed
+        current_hour = int(current_sv_seconds // 3600) % 24
+        current_min  = int((current_sv_seconds % 3600) // 60)
+        current_total_min = current_hour * 60 + current_min
+
+        if self.log_callback:
+            self.log_callback(
+                f"  [fp_dispatch] estimated server time ~{current_hour:02d}:{current_min:02d}")
+
+        # ── Load schedule ───────────────────────────────────────────────
+        sched_path = _Path("logs/fp_schedule.json")
+        if not sched_path.exists():
+            if self.log_callback:
+                self.log_callback("  [fp_dispatch] no fp_schedule.json — skipping")
+            return ActionResult(status=ActionStatus.SKIPPED, action=action,
+                                message="dispatch_fp_task: no schedule file")
+
+        try:
+            sched_data = _json.loads(sched_path.read_text())
+        except Exception as e:
+            return self._fail(action, f"dispatch_fp_task: bad fp_schedule.json — {e}")
+
+        # Derive today's cycle day (Mon=1 … Sun=7) from server_date
+        from datetime import date as _date
+        today_day: str | None = None
+        try:
+            sv_date = st.get("server_date", "")
+            if sv_date:
+                p = sv_date.split("-")
+                today_day = str(_date(int(p[0]), int(p[1]), int(p[2])).isoweekday())
+        except (IndexError, ValueError):
+            pass
+
+        if "days" in sched_data:
+            # New multi-day format
+            if not today_day:
+                return self._fail(action,
+                    "dispatch_fp_task: no server date — cannot determine today's day")
+            schedule: dict = sched_data["days"].get(today_day, {})
+            if not schedule:
+                return self._fail(action,
+                    f"dispatch_fp_task: no schedule for Day {today_day} in fp_schedule.json")
+        else:
+            # Legacy single-day format
+            schedule: dict = sched_data.get("schedule", {})
+
+        if not schedule:
+            return self._fail(action, "dispatch_fp_task: schedule is empty")
+
+        # ── Find active slot (largest slot time ≤ current time) ─────────
+        active_task = None
+        active_slot = ""
+        best_min    = -1
+
+        for slot_time, task_name in schedule.items():
+            try:
+                sh, sm = map(int, slot_time.split(":"))
+            except ValueError:
+                continue
+            slot_min = sh * 60 + sm
+            if slot_min <= current_total_min and slot_min > best_min:
+                best_min    = slot_min
+                active_task = task_name
+                active_slot = slot_time
+
+        if not active_task:
+            # Before the first slot of the day — fall back to first entry
+            first = min(schedule.items(), key=lambda x: x[0])
+            active_slot, active_task = first
+
+        if self.log_callback:
+            self.log_callback(
+                f"  [fp_dispatch] slot {active_slot} → '{active_task}'")
+
+        # ── Load and run the child task ─────────────────────────────────
+        task_path = get_resource_dir() / "tasks" / f"{active_task}.json"
+        if not task_path.exists():
+            return self._fail(action,
+                f"dispatch_fp_task: task file not found: {active_task}.json")
+
+        try:
+            task_data    = _json.loads(task_path.read_text(encoding="utf-8"))
+            task_actions = (task_data.get("actions", task_data)
+                            if isinstance(task_data, dict) else task_data)
+        except Exception as e:
+            return self._fail(action,
+                f"dispatch_fp_task: failed to load {active_task}.json — {e}")
+
+        for sub_action in task_actions:
+            if self._stop_event and self._stop_event.is_set():
+                return ActionResult(status=ActionStatus.SKIPPED, action=action,
+                                    message="Bot stopped")
+            result = self.execute(sub_action)
+            if result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT,
+                                  ActionStatus.ABORT_TASK):
+                return result
+
+        return self._ok(action,
+            f"dispatch_fp_task: '{active_task}' (slot {active_slot}) complete")
 
     def _loop_until_template(self, action: dict) -> ActionResult:
         """
@@ -1850,6 +2400,7 @@ class ActionExecutor:
                     _dbg("  [truck_attack] 4 attacks complete — stopping loop")
                     self._truck_attack_count = 0
                     self._truck_attack_skip_names = set()
+                    self._mark_done_today({"task_key": "truck_attack"})
                     return ActionResult(
                         status=ActionStatus.ABORT_TASK,
                         action=action,
@@ -1928,6 +2479,99 @@ class ActionExecutor:
             self.log_callback(f"  [loop_task] reached max {max_iter} iterations for '{task_name}'")
 
         return self._ok(action, f"loop_task: '{task_name}' done — {completed} completed")
+
+    def _run_task(self, action: dict) -> ActionResult:
+        """
+        Unconditionally load and execute all actions from a sub-task JSON file.
+
+        Example:
+          {"action": "run_task", "task": "fp_reward_collection.json"}
+        """
+        import json as _json
+        task_name = action.get("task")
+        if not task_name:
+            return self._fail(action, "run_task requires 'task'")
+
+        task_path = get_resource_dir() / "tasks" / task_name
+        if not task_path.exists():
+            return self._fail(action, f"run_task: task file not found: {task_name}")
+
+        try:
+            task_data    = _json.loads(task_path.read_text(encoding="utf-8"))
+            task_actions = task_data.get("actions", task_data) if isinstance(task_data, dict) else task_data
+        except Exception as e:
+            return self._fail(action, f"run_task: failed to load {task_name}: {e}")
+
+        if self.log_callback:
+            self.log_callback(f"  [run_task] running '{task_name}' ({len(task_actions)} action(s))")
+
+        for sub_action in task_actions:
+            if self._stop_event and self._stop_event.is_set():
+                break
+            result = self.execute(sub_action)
+            if result.status == ActionStatus.ABORT_TASK:
+                return result
+
+        return self._ok(action, f"run_task: '{task_name}' complete")
+
+    def _run_task_if_template(self, action: dict) -> ActionResult:
+        """
+        Run a sub-task only if an identifying template is currently visible on screen.
+        If the template is not found, continues silently to the next action.
+
+        Required:
+          template  - template filename to look for (e.g. "btn_fp_hero_progression.png")
+          task      - task JSON filename inside tasks/ (e.g. "hero_progression.json")
+
+        Optional:
+          threshold - confidence override for the template check (default: engine threshold)
+
+        Example:
+          {"action": "run_task_if_template", "template": "btn_fp_hero_progression.png",
+           "task": "hero_progression.json"}
+        """
+        import json as _json
+
+        template  = action.get("template")
+        task_name = action.get("task")
+        if not template or not task_name:
+            return self._fail(action, "run_task_if_template requires 'template' and 'task'")
+
+        path       = self._template_path(template)
+        screenshot = self.bot.screenshot()
+        threshold  = action.get("threshold")
+        match      = self.vision.find_template(screenshot, path,
+                         **({"threshold": threshold} if threshold is not None else {}))
+
+        if not match:
+            if self.log_callback:
+                self.log_callback(
+                    f"  [run_task_if_template] '{template}' not found — skipping '{task_name}'")
+            return ActionResult(status=ActionStatus.SKIPPED, action=action,
+                                message=f"template not found, skipping {task_name}")
+
+        task_path = get_resource_dir() / "tasks" / task_name
+        if not task_path.exists():
+            return self._fail(action, f"run_task_if_template: task file not found: {task_name}")
+
+        try:
+            task_data    = _json.loads(task_path.read_text(encoding="utf-8"))
+            task_actions = task_data.get("actions", task_data) if isinstance(task_data, dict) else task_data
+        except Exception as e:
+            return self._fail(action, f"run_task_if_template: failed to load {task_name}: {e}")
+
+        if self.log_callback:
+            self.log_callback(
+                f"  [run_task_if_template] '{template}' matched — running '{task_name}'")
+
+        for sub_action in task_actions:
+            if self._stop_event and self._stop_event.is_set():
+                return ActionResult(status=ActionStatus.SKIPPED, action=action, message="Bot stopped")
+            result = self.execute(sub_action)
+            if result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT, ActionStatus.ABORT_TASK):
+                return result
+
+        return self._ok(action, f"run_task_if_template: '{task_name}' complete")
 
     def _tap_if_slots_available(self, action: dict) -> ActionResult:
         """
@@ -2111,7 +2755,7 @@ class ActionExecutor:
         self._log(f"  [tap_template_or_zone] '{template}' conf={conf:.3f} found={bool(tmatch)}")
 
         if tmatch:
-            self.bot.tap(tmatch.x, tmatch.y)
+            self._do_tap(tmatch.x, tmatch.y)
             return self._ok(action, f"Tapped template '{template}'")
 
         if x_pct is None or y_pct is None:
@@ -2121,7 +2765,7 @@ class ActionExecutor:
         fx = int(w * float(x_pct) / 100)
         fy = int(h * float(y_pct) / 100)
         self._log(f"  [tap_template_or_zone] '{template}' not found — fallback tap ({x_pct}%, {y_pct}%) = ({fx},{fy})")
-        self.bot.tap(fx, fy)
+        self._do_tap(fx, fy)
         return self._ok(action, f"'{template}' not found — tapped fallback zone ({x_pct}%, {y_pct}%)")
 
     def _find_template_with_scroll(self, action: dict) -> ActionResult:
@@ -2303,7 +2947,7 @@ class ActionExecutor:
 
         if tmatch:
             self._log(f"  [tap_template_or_template] tapping at ({tmatch.x}, {tmatch.y})")
-            self.bot.tap(tmatch.x, tmatch.y)
+            self._do_tap(tmatch.x, tmatch.y)
             result = self._ok(action, f"Tapped primary template '{template}' at ({tmatch.x}, {tmatch.y})")
             result.skip_to = skip_to_idx
             return result
@@ -2315,7 +2959,7 @@ class ActionExecutor:
         self._log(f"  [tap_template_or_template] fallback '{fallback_template}' conf={fb_conf:.3f} found={bool(fb_match)}")
         if fb_match:
             self._log(f"  [tap_template_or_template] tapping fallback at ({fb_match.x}, {fb_match.y})")
-            self.bot.tap(fb_match.x, fb_match.y)
+            self._do_tap(fb_match.x, fb_match.y)
             result = self._ok(action,
                 f"Primary '{template}' not found — tapped fallback '{fallback_template}' at ({fb_match.x}, {fb_match.y})")
             result.skip_to = skip_to_idx
@@ -3275,8 +3919,10 @@ class ActionExecutor:
         from pathlib import Path
         from datetime import date
 
-        rally_cfg   = self.farm_settings.get("rally", {})
-        max_rallies = int(rally_cfg.get("max_rallies_per_day", 999))
+        rally_cfg    = self.farm_settings.get("rally", {})
+        farm_max     = int(rally_cfg.get("max_rallies_per_day", 999))
+        # Inline override takes priority — used by event tasks that need a higher limit
+        max_rallies  = int(action["max_rallies"]) if "max_rallies" in action else farm_max
 
         port  = getattr(self.bot, "port", 0)
         today = str(date.today())

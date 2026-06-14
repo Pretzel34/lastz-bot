@@ -1,0 +1,41 @@
+{
+  "name": "full_preparedness",
+  "actions": [
+    {
+      "action": "if_template_tap",
+      "template": "btn_full_preparedness_entry.png",
+      "required": false,
+      "note": "Open the Full Preparedness event panel"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "dispatch_fp_task",
+      "note": "Reads fp_schedule.json + current server time to determine and run the active child task"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "repeat_if_template",
+      "template": "btn_fp_collect_chest.png",
+      "max_taps": 3,
+      "delay": 1.5,
+      "required": false,
+      "note": "Collect up to 3 reward chests"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_close.png",
+      "required": false,
+      "note": "Close the event panel"
+    }
+  ]
+}

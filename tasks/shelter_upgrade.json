@@ -1,0 +1,9 @@
+{
+  "name": "shelter_upgrade",
+  "actions": [
+    {
+      "action": "wait",
+      "seconds": 2.0
+    }
+  ]
+}

@@ -27,6 +27,7 @@
       "action": "tap_template",
       "template": "btn_read_all.png",
       "timeout": 4,
+      "required": false,
       "note": "Tap btn_read_all.png at approx (430,918)"
     },
     {

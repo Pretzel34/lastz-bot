@@ -1,0 +1,11 @@
+{
+  "name": "mod_vehicle",
+  "actions": [
+    {
+      "action": "loop_task",
+      "task": "mod_vehicle_rally.json",
+      "max_iterations": 10,
+      "note": "Repeat boomer rallies until objective verified complete or max iterations hit"
+    }
+  ]
+}

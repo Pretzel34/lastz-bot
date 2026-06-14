@@ -1,0 +1,98 @@
+{
+  "name": "check_event_calander",
+  "actions": [
+    {
+      "action": "skip_if_fp_cycle_current",
+      "note": "Skip entire task \u00e2\u20ac\u201d schedule already captured for this week"
+    },
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_to_world_view.png",
+      "world_btn": "btn_go_to_hq_view.png",
+      "note": "Ensure HQ view before task"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_event_center.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_full_prepardness_schedule.png",
+      "required": false,
+      "on_not_found_continue": true,
+      "log_success": "Full Preparedness schedule tab found directly",
+      "on_not_found": [
+        {
+          "action": "if_template_tap",
+          "template": "btn_full_prepardness_icon.png",
+          "required": false,
+          "log_success": "Full Preparedness icon found \u00e2\u20ac\u201d tapping to open",
+          "on_not_found": [
+            {
+              "action": "scroll_left",
+              "steps": 1,
+              "distance_pct": 60,
+              "start_x_pct": 20.0,
+              "start_y_pct": 92.0,
+              "note": "Tab not visible \u00e2\u20ac\u201d scroll left to find it"
+            },
+            {
+              "action": "wait",
+              "seconds": 3.0
+            },
+            {
+              "action": "tap_template_or_template",
+              "template": "btn_full_prepardness_schedule.png",
+              "fallback_template": "btn_full_prepardness_icon.png",
+              "required": false,
+              "note": "Retry after scroll"
+            }
+          ]
+        },
+        {
+          "action": "wait",
+          "seconds": 3.0,
+          "note": "Wait for panel to open after tapping icon"
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_full_prepardness_schedule.png",
+          "required": false,
+          "note": "Schedule tab should now be visible \u00e2\u20ac\u201d tap it"
+        }
+      ]
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "read_fp_schedule",
+      "note": "OCR the calendar \u00e2\u20ac\u201d scrolls automatically to capture all 7 days; self-skips if this week is already stored"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_back_out_of_page.png",
+      "required": false,
+      "note": "Back out of Full Preparedness schedule"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_back_out_of_page.png",
+      "required": false
+    }
+  ]
+}
