@@ -530,8 +530,9 @@ class EmulatorLauncher:
 
     def _wait_for_game(self, bot, timeout: int = GAME_TIMEOUT) -> bool:
         """Wait for Last Z to finish loading by checking the foreground app."""
-        PLAY_STORE = "com.android.vending"
-        relaunched = False
+        import re
+        relaunched_pkgs: set = set()
+        last_logged_pkg = None
         start = time.time()
         while time.time() - start < timeout:
             try:
@@ -541,13 +542,23 @@ class EmulatorLauncher:
                 if self.package in focus:
                     time.sleep(5)
                     return True
-                # Ad navigated to Play Store — close it and relaunch the game
-                if PLAY_STORE in focus and not relaunched:
-                    self._log("[Launcher] Play Store opened by ad — closing and relaunching Last Z")
-                    bot.shell(f"am force-stop {PLAY_STORE}")
-                    time.sleep(1.0)
-                    bot.launch_app(self.package, self.activity)
-                    relaunched = True
+
+                # Extract the foreground package name for logging/handling
+                m = re.search(r"u0 ([\w.]+)/", focus)
+                fg_pkg = m.group(1) if m else None
+
+                if fg_pkg and fg_pkg != self.package:
+                    if fg_pkg != last_logged_pkg:
+                        self._log(f"[Launcher] Foreground app is '{fg_pkg}' — not Last Z")
+                        last_logged_pkg = fg_pkg
+                    # Ad opened another app — kill it and relaunch the game
+                    if fg_pkg not in relaunched_pkgs:
+                        self._log(f"[Launcher] Closing '{fg_pkg}' and relaunching Last Z")
+                        bot.shell(f"am force-stop {fg_pkg}")
+                        time.sleep(1.0)
+                        bot.launch_app(self.package, self.activity)
+                        relaunched_pkgs.add(fg_pkg)
+                        last_logged_pkg = None
             except Exception:
                 pass
             time.sleep(3)
