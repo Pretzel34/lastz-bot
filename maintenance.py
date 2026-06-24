@@ -103,7 +103,6 @@ class MaintenanceManager:
         steps = [
             ("Clear ADB temp files",   "rm -rf /data/local/tmp/*"),
             ("Clear system cache",     "rm -rf /cache/*"),
-            ("Clear game cache",       f"pm clear --cache-only {GAME_PACKAGE}"),
         ]
         for label, cmd in steps:
             try:
