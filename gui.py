@@ -186,6 +186,19 @@ TASK_CATEGORIES = [
         ]
     },
     {
+        "key":   "research",
+        "label": "Research",
+        "icon":  "🔬",
+        "settings": [
+            {"key": "enabled",      "label": "Enable Research", "type": "toggle", "default": False},
+            {"key": "research_in",  "label": "Research In",     "type": "select", "default": "New Home",
+             "options": ["New Home", "Shelter Building", "Elite Troops", "Hero Training",
+                         "Alliance Recognition", "Fully Armed Alliance", "HQ Management",
+                         "Seige To Sieze", "Rapid Growth", "Military Strategies",
+                         "Unit Special Training", "Age of Steel", "Peace Shield"]},
+        ]
+    },
+    {
         "key":   "alliance_mining",
         "label": "Alliance Mining",
         "icon":  "⛏️",
@@ -1379,6 +1392,12 @@ class BotApp(ctk.CTk):
         scroll = ctk.CTkScrollableFrame(pg, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=16, pady=8)
 
+        time_card = self._card(scroll, "Server Time")
+        self._server_time_label = ctk.CTkLabel(
+            time_card, text="—", font=FM, text_color=C["text2"])
+        self._server_time_label.pack(anchor="w", padx=8, pady=(0, 6))
+        self._refresh_server_time_label()
+
         card = self._card(scroll, "Session Overview")
 
         hrow = ctk.CTkFrame(card, fg_color=C["panel2"], corner_radius=4)
@@ -1394,7 +1413,31 @@ class BotApp(ctk.CTk):
         self._btn(scroll, "⟳ Refresh", self._refresh_stats_table,
                   C["accent"]).pack(anchor="e", pady=8)
 
+    def _refresh_server_time_label(self):
+        import json as _json
+        from datetime import datetime as _dt
+        from pathlib import Path as _Path
+
+        def _read(filename):
+            try:
+                data = _json.loads(_Path(f"logs/{filename}").read_text())
+                date = data.get("date", "")
+                time = data.get("time", "")
+                recorded = _dt.fromisoformat(data.get("recorded_at", ""))
+                age_min = int((_dt.now() - recorded).total_seconds() // 60)
+                age_str = f"{age_min}m ago" if age_min < 60 else f"{age_min // 60}h {age_min % 60}m ago"
+                return f"{date}  {time}  ({age_str})"
+            except Exception:
+                return "—"
+
+        server = _read("server_time.json")
+        local  = _read("local_time.json")
+        self._server_time_label.configure(
+            text=f"Server:  {server}\nLocal:    {local}"
+        )
+
     def _refresh_stats_table(self):
+        self._refresh_server_time_label()
         for w in self.stats_rows_frame.winfo_children():
             w.destroy()
         for farm in self.farms:
@@ -1841,6 +1884,12 @@ class BotApp(ctk.CTk):
                         self.after(0, lambda err=_e: self._log(
                             f"  ⚠ Update check error: {err}", "warn"))
 
+                # Interruptible ~3s settle between consecutive pre-farm tasks
+                def _prefarm_gap():
+                    if engine._stop_event.is_set():
+                        return
+                    executor.execute({"action": "wait", "seconds": 3.0})
+
                 # Step 3 — run startup dismiss sequence before tasks
                 from pathlib import Path
                 startup_file = tasks_dir / "startup_dismiss.json"
@@ -1859,6 +1908,8 @@ class BotApp(ctk.CTk):
                         self.after(0, lambda err=e: self._log(f"  ⚠ Startup dismiss error: {err}", "warn"))
                 else:
                     self.after(0, lambda: self._log("  ℹ No startup_dismiss.json found — skipping", "info"))
+
+                _prefarm_gap()
 
                 # Step 3b — run identify_resources to determine gather priority
                 identify_file = tasks_dir / "identify_resources.json"
@@ -1892,6 +1943,8 @@ class BotApp(ctk.CTk):
                 else:
                     self.after(0, lambda: self._log("  ℹ No identify_resources.json found — skipping", "info"))
 
+                _prefarm_gap()
+
                 # Step 3c — read server time so daily-task skipping works
                 server_time_file = tasks_dir / "check_server_time.json"
                 if server_time_file.exists():
@@ -1912,25 +1965,29 @@ class BotApp(ctk.CTk):
                 else:
                     self.after(0, lambda: self._log("  ℹ No check_server_time.json found — skipping", "info"))
 
-                # Step 3d — read Full Preparedness schedule (once per server day)
-                fp_sched_file = tasks_dir / "read_fp_schedule.json"
+                _prefarm_gap()
+
+                # Step 3d — capture the current Full Preparedness event (green-highlighted row)
+                fp_sched_file = tasks_dir / "check_event_calander.json"
                 if fp_sched_file.exists():
                     try:
                         with open(fp_sched_file) as _fpf:
                             _fp_data = _json.load(_fpf)
                         _fp_actions = (_fp_data.get("actions", [])
                                        if isinstance(_fp_data, dict) else _fp_data)
-                        self.after(0, lambda: self._log("  ▶ Reading Full Preparedness schedule...", "info"))
+                        self.after(0, lambda: self._log("  ▶ Reading current Full Preparedness event...", "info"))
                         for _act in _fp_actions:
                             if engine._stop_event.is_set():
                                 return
                             executor.execute(_act)
-                        self.after(0, lambda: self._log("  ✓ FP schedule ready", "success"))
+                        self.after(0, lambda: self._log("  ✓ FP event captured", "success"))
                     except Exception as _e:
                         self.after(0, lambda err=_e: self._log(
-                            f"  ⚠ read_fp_schedule error: {err}", "warn"))
+                            f"  ⚠ check_event_calander error: {err}", "warn"))
                 else:
-                    self.after(0, lambda: self._log("  ℹ No read_fp_schedule.json found — skipping", "info"))
+                    self.after(0, lambda: self._log("  ℹ No check_event_calander.json found — skipping", "info"))
+
+                _prefarm_gap()
 
                 # Step 4 — load tasks from JSON files and start
                 tasks = self._farm_to_tasks(farm)
@@ -2404,6 +2461,25 @@ class BotApp(ctk.CTk):
             except Exception as e:
                 self._log(f"  ✗ Failed to load enter_bounties.json: {e}", "error")
 
+        def _add_research():
+            research_cfg = farm_tasks.get("research", {})
+            if not research_cfg.get("enabled", False):
+                self._log("  Research disabled — skipping", "warn")
+                return
+            json_file = tasks_dir / "research.json"
+            if json_file.exists():
+                try:
+                    with open(json_file) as f:
+                        data = _json.load(f)
+                    actions = data.get("actions", data) if isinstance(data, dict) else data
+                    selected = research_cfg.get("research_in", "?")
+                    tasks.append({"name": f"Research ({selected})", "actions": actions})
+                    self._log(f"  ✓ Research → {selected} — {len(actions)} actions", "info")
+                except Exception as e:
+                    self._log(f"  ✗ Failed to load research.json: {e}", "error")
+            else:
+                self._log("  ⚠ research.json not found, skipping", "warn")
+
         _builders = {
             "daily_tasks":     _add_daily,
             "rally":           _add_rally,
@@ -2412,6 +2488,7 @@ class BotApp(ctk.CTk):
             "alliance_mining": _add_alliance_mining,
             "trucks":          _add_trucks,
             "bounties":        _add_bounties,
+            "research":        _add_research,
         }
 
         default_order = [c["key"] for c in TASK_CATEGORIES]

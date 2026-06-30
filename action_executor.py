@@ -78,6 +78,10 @@ class ActionExecutor:
         compare_resources        - OCR resource panel and compare two resource values (e.g. wood < food)
         read_resource_priority   - screenshot resource panel, rank by Total RSS ascending, save to logs/resource_priority.json
         read_server_time         - OCR Apocalypse Time screen, save server date/time to logs/server_time.json
+        read_local_time          - OCR local time panel, save to logs/local_time.json
+        ensure_server_time_mode  - if panel is showing local time, tap btn_alternate_time.png to switch to server time
+        ensure_local_time_mode   - if panel is showing server time, tap btn_alternate_time.png to switch to local time
+        skip_if_server_time_fresh - ABORT_TASK if logs/server_time.json was written within the last 24 hours
         skip_if_done_today       - ABORT_TASK if task_key was already completed on today's server date for this farm
         mark_done_today          - record task_key as completed on today's server date for this farm
         read_fp_schedule         - OCR Full Preparedness Event Calendar and save today's time→task schedule (self-skips if already current)
@@ -213,6 +217,7 @@ class ActionExecutor:
             "tap_template_or_template": self._tap_template_or_template,
             "tap_first_found":          self._tap_first_found,
             "tap_template_or_ocr_pattern": self._tap_template_or_ocr_pattern,
+            "tap_ocr_pattern":          self._tap_ocr_pattern,
             "tap_active_alliance_mine":    self._tap_active_alliance_mine,
             "tap_free_formation":       self._tap_free_formation,
             "check_claimed":            self._check_claimed,
@@ -233,11 +238,18 @@ class ActionExecutor:
             "check_truck_quality":      self._check_truck_quality,
             "execute_truck_attack":     self._execute_truck_attack,
             "read_server_time":         self._read_server_time,
+            "read_local_time":          self._read_local_time,
+            "ensure_server_time_mode":  self._ensure_server_time_mode,
+            "ensure_local_time_mode":   self._ensure_local_time_mode,
+            "skip_if_server_time_fresh": self._skip_if_server_time_fresh,
             "skip_if_done_today":       self._skip_if_done_today,
             "mark_done_today":          self._mark_done_today,
-            "skip_if_fp_cycle_current": self._skip_if_fp_cycle_current,
-            "read_fp_schedule":         self._read_fp_schedule,
-            "dispatch_fp_task":         self._dispatch_fp_task,
+            "skip_if_fp_cycle_current":  self._skip_if_fp_cycle_current,
+            "read_fp_schedule":          self._read_fp_schedule,
+            "skip_if_fp_event_current":  self._skip_if_fp_event_current,
+            "read_current_fp_event":     self._read_current_fp_event,
+            "tap_selected_research":     self._tap_selected_research,
+            "dispatch_fp_task":          self._dispatch_fp_task,
         }
 
         handler = handlers.get(action_type)
@@ -1330,15 +1342,59 @@ class ActionExecutor:
     # Server-time / daily task helpers
     # ------------------------------------------------------------------
 
-    def _read_server_time(self, action: dict) -> ActionResult:
+    def _detect_time_panel_mode(self) -> str:
         """
-        OCR the Apocalypse Time screen and persist the server date.
+        OCR the time panel and return 'server', 'local', or 'unknown'.
 
-        Reads two screen regions:
-          - Top-right calendar (for year-month "2026-6" and day "3")
-          - Center band (for time "14:19:02")
+        Detects mode by checking for known title strings in the center band.
+        NOTE: title strings are English-only for now — will read from a language
+        config once the first-run language selection system is implemented.
+        """
+        ss = self.bot.screenshot()
+        w, h = ss.size
+        time_region = (int(w * 0.20), int(h * 0.30), int(w * 0.80), int(h * 0.42))
+        raw = " ".join(r.text for r in self.vision.read_text(ss, region=time_region, min_confidence=0.3))
+        if "Apocalypse" in raw:
+            return "server"
+        if "Local" in raw:
+            return "local"
+        return "unknown"
 
-        Saves logs/server_time.json and stores self._server_date for the session.
+    def _ensure_time_mode(self, action: dict, target: str) -> ActionResult:
+        """Shared logic for ensure_server_time_mode and ensure_local_time_mode."""
+        import time as _time
+        mode = self._detect_time_panel_mode()
+        if self.log_callback:
+            self.log_callback(f"  [time_mode] detected='{mode}' target='{target}'")
+        if mode == target or mode == "unknown":
+            return self._ok(action, f"ensure_{target}_time_mode: already in {mode} mode")
+        # Wrong mode — tap the toggle
+        tmpl = "btn_alternate_time.png"
+        result = self.vision.find_template(self.bot.screenshot(), self._template_path(tmpl))
+        if result and result.confidence >= 0.8:
+            self.bot.tap(result.x, result.y)
+            _time.sleep(2.0)
+            if self.log_callback:
+                self.log_callback(f"  [time_mode] toggled to {target} mode")
+        else:
+            return self._fail(action, f"ensure_{target}_time_mode: '{tmpl}' not found to toggle")
+        return self._ok(action, f"ensure_{target}_time_mode: switched from {mode} to {target}")
+
+    def _ensure_server_time_mode(self, action: dict) -> ActionResult:
+        """If panel is in local time mode, tap the toggle to switch to server time."""
+        return self._ensure_time_mode(action, "server")
+
+    def _ensure_local_time_mode(self, action: dict) -> ActionResult:
+        """If panel is in server time mode, tap the toggle to switch to local time."""
+        return self._ensure_time_mode(action, "local")
+
+    def _ocr_time_panel(self, action: dict, label: str, save_file: str) -> ActionResult:
+        """
+        Shared OCR helper for both read_server_time and read_local_time.
+        Reads the Apocalypse Time panel (server or local view) and saves results.
+
+          label     : log prefix, e.g. "server_time" or "local_time"
+          save_file : filename under logs/, e.g. "server_time.json" or "local_time.json"
         """
         import re as _re
         import json as _json
@@ -1355,41 +1411,109 @@ class ActionExecutor:
         time_raw = " ".join(r.text for r in self.vision.read_text(ss, region=time_region, min_confidence=0.3))
 
         if self.log_callback:
-            self.log_callback(f"  [server_time] cal='{cal_raw}'  time='{time_raw}'")
+            self.log_callback(f"  [{label}] cal='{cal_raw}'  time='{time_raw}'")
 
         # Parse year-month from calendar, then find day immediately after
         ym_m = _re.search(r'(\d{4})-(\d{1,2})', cal_raw)
-        server_date = None
+        date_str = None
         if ym_m:
             after_ym = cal_raw[ym_m.end():]
             day_m = _re.search(r'\b(\d{1,2})\b', after_ym)
             if day_m:
-                server_date = f"{ym_m.group(0)}-{day_m.group(1)}"
+                date_str = f"{ym_m.group(0)}-{day_m.group(1)}"
 
-        time_m = _re.search(r'(\d{1,2}:\d{2}:\d{2})', time_raw)
-        server_time = time_m.group(1) if time_m else ""
+        # Accept HH:MM:SS or HH:MM (clean OCR)
+        time_m = _re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)', time_raw)
+        if time_m:
+            time_str = time_m.group(1)
+        else:
+            # Fallback: stylized font causes colons to OCR as a stray digit (e.g. "20:22:48" → "20822248"
+            # or "20:52:05" → "20352305"). Colon can render as any digit, so constrain by valid time
+            # ranges instead: HH=00-23, MM=00-59, SS=00-59, each colon replaced by one stray digit.
+            _tp = r'((?:[01]\d|2[0-3]))\d([0-5]\d)\d([0-5]\d)'
+            garbled_m = _re.search(_tp, time_raw)
+            if not garbled_m:
+                garbled_m = _re.search(_tp, " ".join(
+                    r.text for r in self.vision.read_text(ss, min_confidence=0.3)))
+            time_str = f"{garbled_m.group(1)}:{garbled_m.group(2)}:{garbled_m.group(3)}" if garbled_m else ""
 
-        if not server_date or not server_time:
+        if not date_str or not time_str:
+            try:
+                debug_path = _Path(f"logs/{label}_debug.png")
+                ss.save(str(debug_path))
+                if self.log_callback:
+                    self.log_callback(f"  [{label}] debug screenshot → {debug_path}")
+            except Exception:
+                pass
+            full_raw = " ".join(r.text for r in self.vision.read_text(ss, min_confidence=0.3))
+            if self.log_callback:
+                self.log_callback(f"  [{label}] full-screen OCR: '{full_raw}'")
             return self._fail(action,
-                f"read_server_time: could not parse date/time (cal='{cal_raw}' time='{time_raw}')")
+                f"{label}: could not parse date/time (cal='{cal_raw}' time='{time_raw}')")
 
         now = _dt.now()
-        self._server_date        = server_date
-        self._server_time        = server_time        # "14:19:02"
-        self._server_recorded_at = now                # local datetime at recording
-
         _Path("logs").mkdir(exist_ok=True)
         out = {
-            "server_date":  server_date,
-            "server_time":  server_time,
-            "recorded_at":  now.isoformat(timespec="seconds"),
+            "date":        date_str,
+            "time":        time_str,
+            "recorded_at": now.isoformat(timespec="seconds"),
         }
-        _Path("logs/server_time.json").write_text(_json.dumps(out, indent=2))
+        _Path(f"logs/{save_file}").write_text(_json.dumps(out, indent=2))
 
         if self.log_callback:
-            self.log_callback(f"  [server_time] {server_date} {server_time} — saved")
+            self.log_callback(f"  [{label}] {date_str} {time_str} — saved")
 
+        return date_str, time_str, now
+
+    def _read_server_time(self, action: dict) -> ActionResult:
+        """OCR the Apocalypse Time screen (server time view) and save to logs/server_time.json."""
+        result = self._ocr_time_panel(action, "server_time", "server_time.json")
+        if isinstance(result, ActionResult):
+            return result
+        server_date, server_time, now = result
+        self._server_date        = server_date
+        self._server_time        = server_time
+        self._server_recorded_at = now
         return self._ok(action, f"read_server_time: {server_date} {server_time}")
+
+    def _read_local_time(self, action: dict) -> ActionResult:
+        """OCR the Apocalypse Time screen (local time view) and save to logs/local_time.json."""
+        result = self._ocr_time_panel(action, "local_time", "local_time.json")
+        if isinstance(result, ActionResult):
+            return result
+        local_date, local_time, now = result
+        self._local_date        = local_date
+        self._local_time        = local_time
+        self._local_recorded_at = now
+        return self._ok(action, f"read_local_time: {local_date} {local_time}")
+
+    def _skip_if_server_time_fresh(self, action: dict) -> ActionResult:
+        """
+        ABORT_TASK if logs/server_time.json was written within the last 24 hours.
+
+        Use this as the first action in check_server_time to avoid re-opening
+        the Apocalypse Time panel when the server time is already current.
+        """
+        import json as _json
+        from datetime import datetime as _dt, timedelta as _td
+        from pathlib import Path as _Path
+
+        p = _Path("logs/server_time.json")
+        if p.exists():
+            try:
+                data = _json.loads(p.read_text())
+                recorded_at = _dt.fromisoformat(data.get("recorded_at", ""))
+                age = _dt.now() - recorded_at
+                if age < _td(hours=24):
+                    msg = (f"server_time fresh ({int(age.total_seconds() // 3600)}h "
+                           f"{int((age.total_seconds() % 3600) // 60)}m old) — skipping")
+                    if self.log_callback:
+                        self.log_callback(f"  ⏭ [server_time] {msg}")
+                    return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+            except Exception:
+                pass
+
+        return self._ok(action, "skip_if_server_time_fresh: stale or missing — continuing")
 
     def _skip_if_done_today(self, action: dict) -> ActionResult:
         """
@@ -1519,18 +1643,22 @@ class ActionExecutor:
         if sched_path.exists():
             try:
                 data = _json.loads(sched_path.read_text())
-                if (data.get("cycle_start_date") == cycle_start
-                        and data.get("days", {}).get(today_day)):
-                    msg = f"FP Day {today_day} already captured for week of {cycle_start} — skipping"
+                day_slots = data.get("days", {}).get(today_day, {})
+                if data.get("cycle_start_date") == cycle_start and len(day_slots) >= 6:
+                    msg = f"FP Day {today_day} fully captured ({len(day_slots)} slots) for week of {cycle_start} — skipping"
                     if self.log_callback:
                         self.log_callback(f"  ✅ [fp_cycle] {msg}")
                     return ActionResult(
                         status=ActionStatus.ABORT_TASK, action=action, message=msg)
+                elif day_slots:
+                    if self.log_callback:
+                        self.log_callback(
+                            f"  [fp_cycle] Day {today_day} only has {len(day_slots)}/6 slots — running again")
             except Exception:
                 pass
 
         return self._ok(action,
-            f"skip_if_fp_cycle_current: Day {today_day} not yet captured — continuing")
+            f"skip_if_fp_cycle_current: Day {today_day} not yet fully captured — continuing")
 
     # Maps OCR text (lowercase, stripped) → task filename stem
     _FP_THEME_MAP = {
@@ -1636,6 +1764,11 @@ class ActionExecutor:
                     continue
                 continue
 
+            # Stop if a new day header appears — don't let the next day's slots bleed in
+            next_day_m = _re.search(r'\bDay\s+(\d+)\b', row_text, _re.IGNORECASE)
+            if next_day_m and str(int(next_day_m.group(1))) != screen_day:
+                break
+
             # Parse time + theme slots under the header
             time_m = _re.search(r'\b(\d{2}:\d{2})\b', row_text)
             if not time_m:
@@ -1656,6 +1789,10 @@ class ActionExecutor:
             elif self.log_callback:
                 self.log_callback(
                     f"  [fp_schedule] Day {screen_day}  {slot_time} — unknown theme: '{theme_raw}'")
+
+            # Each day has exactly 6 slots — stop once we have them all
+            if len(slots) >= 6:
+                break
 
         # Fall back to server date if OCR missed the day header
         if screen_day is None:
@@ -1701,134 +1838,282 @@ class ActionExecutor:
         return self._ok(action,
             f"read_fp_schedule: Day {screen_day}, {len(slots)} slot(s) saved")
 
-    def _dispatch_fp_task(self, action: dict) -> ActionResult:
+    # Maps the farm's research.research_in dropdown value → on-screen template.
+    _RESEARCH_TEMPLATE_MAP = {
+        "New Home":              "btn_new_home.png",
+        "Shelter Building":      "btn_shelter_building.png",
+        "Elite Troops":          "btn_elite_troops.png",
+        "Hero Training":         "btn_hero_training.png",
+        "Alliance Recognition":  "btn_alliance_recognition.png",
+        "Fully Armed Alliance":  "btn_fully_armed_alliance.png",
+        "HQ Management":         "btn_hq_managment.png",
+        "Seige To Sieze":        "btn_siege_to_seize.png",
+        "Rapid Growth":          "btn_rapid_growth.png",
+        "Military Strategies":   "btn_military_strategies.png",
+        "Unit Special Training": "btn_unit_special_training.png",
+        "Age of Steel":          "btn_age_of_steel.png",
+        "Peace Shield":          "btn_peace_shield.png",
+    }
+
+    def _tap_selected_research(self, action: dict) -> ActionResult:
         """
-        Derive the current server time, look up the Full Preparedness schedule, and
-        run the matching child task.
+        Look for the research the farm selected (research.research_in), tap it if found.
+        If not found, scroll down and look again (max_scrolls times).  If still not
+        found, ABORT_TASK.
 
-        Reads logs/fp_schedule.json and logs/server_time.json.  Uses elapsed local
-        time since server_time was recorded to estimate the current server time, so
-        no additional navigation is required.
+        Parameters
+        ----------
+        max_scrolls   : how many scroll-down retries before giving up (default 1)
+        scroll_x_pct  : X centre of scroll swipe as % of width  (default 50)
+        scroll_y_pct  : Y centre of scroll swipe as % of height (default 60)
+        distance_pct  : swipe distance as % of screen height    (default 40)
+        duration_ms   : swipe duration in milliseconds          (default 500)
+        wait_seconds  : pause after each scroll before rechecking (default 1.5)
+        threshold     : vision confidence override (optional)
+        """
+        import time as _time
 
-        Silently skips (SKIPPED) if no schedule file exists or the current slot
-        cannot be determined.
+        cfg       = self.farm_settings.get("research", {})
+        selection = cfg.get("research_in", "")
+        tmpl      = self._RESEARCH_TEMPLATE_MAP.get(selection)
+        if not tmpl:
+            msg = f"tap_selected_research: no template for selection '{selection}' — stopping task"
+            if self.log_callback:
+                self.log_callback(f"  ✗ {msg}")
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+
+        threshold    = float(action.get("threshold")) if action.get("threshold") is not None else None
+        max_scrolls  = int(action.get("max_scrolls", 1))
+        scroll_x_pct = float(action.get("scroll_x_pct", 50))
+        scroll_y_pct = float(action.get("scroll_y_pct", 60))
+        distance_pct = float(action.get("distance_pct", 40))
+        duration_ms  = int(action.get("duration_ms", 500))
+        wait_secs    = float(action.get("wait_seconds", 1.5))
+        path = self._template_path(tmpl)
+
+        def _check():
+            ss   = self.bot.screenshot()
+            m    = self.vision.find_template(ss, path, threshold=threshold)
+            conf = getattr(m, "confidence", 0) if m else 0
+            self._log(f"  [research] '{selection}' ({tmpl}) conf={conf:.3f} found={bool(m)}")
+            return m
+
+        # ── Attempt 1: check immediately ─────────────────────────────────
+        match = _check()
+        if match:
+            self.bot.tap(match.x, match.y)
+            return self._ok(action, f"tap_selected_research: tapped '{selection}'")
+
+        # ── Scroll down and retry ────────────────────────────────────────
+        w, h = self._screen_size()
+        cx = int(w * scroll_x_pct / 100)
+        cy = int(h * scroll_y_pct / 100)
+        dy = int(h * distance_pct / 100)
+        for i in range(max_scrolls):
+            if self._stop_event and self._stop_event.is_set():
+                return ActionResult(status=ActionStatus.SKIPPED, action=action,
+                                    message="Bot stopped")
+            self._log(f"  [research] not found — scrolling down ({i+1}/{max_scrolls})")
+            self.bot.swipe(cx, cy, cx, cy - dy, duration_ms=duration_ms)
+            _time.sleep(wait_secs)
+            match = _check()
+            if match:
+                self.bot.tap(match.x, match.y)
+                return self._ok(action,
+                    f"tap_selected_research: tapped '{selection}' after scroll")
+
+        msg = (f"tap_selected_research: '{selection}' ({tmpl}) not found after "
+               f"{max_scrolls} scroll(s) — stopping task")
+        if self.log_callback:
+            self.log_callback(f"  ✗ {msg}")
+        return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+
+    def _get_estimated_server_time(self) -> tuple | None:
+        """
+        Returns (hour, minute) estimated current server time using server_time.json
+        plus elapsed local wall-clock time.  Returns None if unavailable.
+        """
+        import json as _json
+        from datetime import datetime as _dt
+        from pathlib import Path as _Path
+
+        try:
+            p = _Path("logs/server_time.json")
+            if not p.exists():
+                return None
+            data = _json.loads(p.read_text())
+            sv_time_str  = data.get("time") or data.get("server_time", "")
+            recorded_str = data.get("recorded_at", "")
+            if not sv_time_str:
+                return None
+            parts = sv_time_str.split(":")
+            h, m, s = int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0
+            sv_seconds = h * 3600 + m * 60 + s
+            try:
+                elapsed = (_dt.now() - _dt.fromisoformat(recorded_str)).total_seconds()
+            except Exception:
+                elapsed = 0
+            current = sv_seconds + elapsed
+            return (int(current // 3600) % 24, int((current % 3600) // 60))
+        except Exception:
+            return None
+
+    def _fp_slot_is_current(self, slot_time: str, srv: tuple) -> bool:
+        """Return True if slot_time (HH:MM) is the active 4-hour window for server (hour, min)."""
+        try:
+            sh, sm = map(int, slot_time.split(":"))
+        except ValueError:
+            return False
+        server_mins = srv[0] * 60 + srv[1]
+        slot_mins   = sh * 60 + sm
+        next_mins   = slot_mins + 240
+        if next_mins >= 1440:
+            return server_mins >= slot_mins or server_mins < (next_mins % 1440)
+        return slot_mins <= server_mins < next_mins
+
+    def _skip_if_fp_event_current(self, action: dict) -> ActionResult:
+        """
+        ABORT_TASK if fp_current_event.json holds an event that is still active
+        based on estimated server time (each FP slot spans 4 hours).
+        Continues if the event has expired, so the caller re-captures the current one.
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        p = _Path("logs/fp_current_event.json")
+        if not p.exists():
+            return self._ok(action, "skip_if_fp_event_current: no event captured yet — continuing")
+
+        try:
+            data      = _json.loads(p.read_text())
+            slot_time = data.get("slot_time", "")
+            task_name = data.get("task", "unknown")
+        except Exception:
+            return self._ok(action, "skip_if_fp_event_current: unreadable file — continuing")
+
+        srv = self._get_estimated_server_time()
+        if srv is None:
+            return self._ok(action, "skip_if_fp_event_current: no server time — continuing")
+
+        if self._fp_slot_is_current(slot_time, srv):
+            msg = f"FP event '{task_name}' at {slot_time} still active — skipping"
+            if self.log_callback:
+                self.log_callback(f"  [fp_event] {msg}")
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+
+        return self._ok(action,
+            f"skip_if_fp_event_current: '{task_name}' at {slot_time} has expired — re-capturing")
+
+    def _read_current_fp_event(self, action: dict) -> ActionResult:
+        """
+        Detect the green-highlighted row in the FP schedule view and OCR its time + theme.
+        Saves logs/fp_current_event.json with slot_time, task, and recorded_at.
         """
         import re as _re
         import json as _json
         from datetime import datetime as _dt
         from pathlib import Path as _Path
 
-        # ── Derive current server time ──────────────────────────────────
-        st_path = _Path("logs/server_time.json")
-        if not st_path.exists():
+        ss  = self.bot.screenshot()
+        w, h = ss.size
+        img = ss.convert("RGB")
+        pix = img.load()
+
+        # Scan rows for green-dominant pixels (G channel beats R and B by margin)
+        sample_step = max(1, w // 60)
+        sample_cols = list(range(0, w, sample_step))
+        green_rows  = []
+        for y in range(h):
+            green_count = sum(
+                1 for x in sample_cols
+                if (lambda r, g, b: g > r + 25 and g > b + 25 and g > 90)(*pix[x, y])
+            )
+            if green_count >= max(1, len(sample_cols) // 6):
+                green_rows.append(y)
+
+        if not green_rows:
+            return self._fail(action, "read_current_fp_event: no green highlight detected")
+
+        y_min = max(0,  min(green_rows) - 5)
+        y_max = min(h,  max(green_rows) + 5)
+        if self.log_callback:
+            self.log_callback(f"  [fp_event] green band y={y_min}..{y_max}")
+
+        raw_results = self.vision.read_text(ss, region=(0, y_min, w, y_max), min_confidence=0.25)
+        raw = " ".join(r.text for r in raw_results)
+        if self.log_callback:
+            self.log_callback(f"  [fp_event] OCR: '{raw}'")
+
+        time_m = _re.search(r'\b(\d{2}:\d{2})\b', raw)
+        if not time_m:
+            return self._fail(action, f"read_current_fp_event: no time in '{raw}'")
+        slot_time  = time_m.group(1)
+        theme_raw  = raw.replace(time_m.group(0), "").strip().lower()
+
+        task_name = self._FP_THEME_MAP.get(theme_raw)
+        if not task_name:
+            for k, v in self._FP_THEME_MAP.items():
+                if k in theme_raw:
+                    task_name = v
+                    break
+
+        if not task_name:
+            return self._fail(action, f"read_current_fp_event: unknown theme '{theme_raw}'")
+
+        _Path("logs").mkdir(exist_ok=True)
+        out = {
+            "slot_time":   slot_time,
+            "task":        task_name,
+            "recorded_at": _dt.now().isoformat(timespec="seconds"),
+        }
+        _Path("logs/fp_current_event.json").write_text(_json.dumps(out, indent=2))
+        if self.log_callback:
+            self.log_callback(f"  [fp_event] {slot_time} → {task_name} — saved")
+
+        return self._ok(action, f"read_current_fp_event: {slot_time} → {task_name}")
+
+    def _dispatch_fp_task(self, action: dict) -> ActionResult:
+        """
+        Read the current FP event from fp_current_event.json and run its child task.
+        Warns if the event has expired (re-run check_event_calander to refresh).
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        p = _Path("logs/fp_current_event.json")
+        if not p.exists():
             if self.log_callback:
-                self.log_callback("  [fp_dispatch] no server_time.json — skipping")
+                self.log_callback("  [fp_dispatch] no fp_current_event.json — run check_event_calander first")
             return ActionResult(status=ActionStatus.SKIPPED, action=action,
-                                message="dispatch_fp_task: no server time available")
+                                message="dispatch_fp_task: no current event captured")
 
         try:
-            st = _json.loads(st_path.read_text())
-            sv_time_str  = st["server_time"]   # "14:19:02"
-            recorded_str = st["recorded_at"]    # local ISO
+            data      = _json.loads(p.read_text())
+            slot_time = data["slot_time"]
+            active_task = data["task"]
         except Exception as e:
-            return self._fail(action, f"dispatch_fp_task: bad server_time.json — {e}")
+            return self._fail(action, f"dispatch_fp_task: bad fp_current_event.json — {e}")
 
-        h, m, s     = map(int, sv_time_str.split(":"))
-        sv_seconds  = h * 3600 + m * 60 + s
-
-        try:
-            recorded_at = _dt.fromisoformat(recorded_str)
-            elapsed     = (_dt.now() - recorded_at).total_seconds()
-        except Exception:
-            elapsed = 0
-
-        current_sv_seconds = sv_seconds + elapsed
-        current_hour = int(current_sv_seconds // 3600) % 24
-        current_min  = int((current_sv_seconds % 3600) // 60)
-        current_total_min = current_hour * 60 + current_min
+        srv = self._get_estimated_server_time()
+        if srv is not None and not self._fp_slot_is_current(slot_time, srv):
+            if self.log_callback:
+                self.log_callback(
+                    f"  [fp_dispatch] WARNING: '{active_task}' at {slot_time} has expired — "
+                    f"re-run check_event_calander to update")
 
         if self.log_callback:
-            self.log_callback(
-                f"  [fp_dispatch] estimated server time ~{current_hour:02d}:{current_min:02d}")
+            self.log_callback(f"  [fp_dispatch] slot {slot_time} → '{active_task}'")
 
-        # ── Load schedule ───────────────────────────────────────────────
-        sched_path = _Path("logs/fp_schedule.json")
-        if not sched_path.exists():
-            if self.log_callback:
-                self.log_callback("  [fp_dispatch] no fp_schedule.json — skipping")
-            return ActionResult(status=ActionStatus.SKIPPED, action=action,
-                                message="dispatch_fp_task: no schedule file")
-
-        try:
-            sched_data = _json.loads(sched_path.read_text())
-        except Exception as e:
-            return self._fail(action, f"dispatch_fp_task: bad fp_schedule.json — {e}")
-
-        # Derive today's cycle day (Mon=1 … Sun=7) from server_date
-        from datetime import date as _date
-        today_day: str | None = None
-        try:
-            sv_date = st.get("server_date", "")
-            if sv_date:
-                p = sv_date.split("-")
-                today_day = str(_date(int(p[0]), int(p[1]), int(p[2])).isoweekday())
-        except (IndexError, ValueError):
-            pass
-
-        if "days" in sched_data:
-            # New multi-day format
-            if not today_day:
-                return self._fail(action,
-                    "dispatch_fp_task: no server date — cannot determine today's day")
-            schedule: dict = sched_data["days"].get(today_day, {})
-            if not schedule:
-                return self._fail(action,
-                    f"dispatch_fp_task: no schedule for Day {today_day} in fp_schedule.json")
-        else:
-            # Legacy single-day format
-            schedule: dict = sched_data.get("schedule", {})
-
-        if not schedule:
-            return self._fail(action, "dispatch_fp_task: schedule is empty")
-
-        # ── Find active slot (largest slot time ≤ current time) ─────────
-        active_task = None
-        active_slot = ""
-        best_min    = -1
-
-        for slot_time, task_name in schedule.items():
-            try:
-                sh, sm = map(int, slot_time.split(":"))
-            except ValueError:
-                continue
-            slot_min = sh * 60 + sm
-            if slot_min <= current_total_min and slot_min > best_min:
-                best_min    = slot_min
-                active_task = task_name
-                active_slot = slot_time
-
-        if not active_task:
-            # Before the first slot of the day — fall back to first entry
-            first = min(schedule.items(), key=lambda x: x[0])
-            active_slot, active_task = first
-
-        if self.log_callback:
-            self.log_callback(
-                f"  [fp_dispatch] slot {active_slot} → '{active_task}'")
-
-        # ── Load and run the child task ─────────────────────────────────
         task_path = get_resource_dir() / "tasks" / f"{active_task}.json"
         if not task_path.exists():
-            return self._fail(action,
-                f"dispatch_fp_task: task file not found: {active_task}.json")
+            return self._fail(action, f"dispatch_fp_task: task file not found: {active_task}.json")
 
         try:
             task_data    = _json.loads(task_path.read_text(encoding="utf-8"))
             task_actions = (task_data.get("actions", task_data)
                             if isinstance(task_data, dict) else task_data)
         except Exception as e:
-            return self._fail(action,
-                f"dispatch_fp_task: failed to load {active_task}.json — {e}")
+            return self._fail(action, f"dispatch_fp_task: failed to load {active_task}.json — {e}")
 
         for sub_action in task_actions:
             if self._stop_event and self._stop_event.is_set():
@@ -1839,8 +2124,7 @@ class ActionExecutor:
                                   ActionStatus.ABORT_TASK):
                 return result
 
-        return self._ok(action,
-            f"dispatch_fp_task: '{active_task}' (slot {active_slot}) complete")
+        return self._ok(action, f"dispatch_fp_task: '{active_task}' (slot {slot_time}) complete")
 
     def _loop_until_template(self, action: dict) -> ActionResult:
         """
@@ -3277,6 +3561,45 @@ class ActionExecutor:
         if not action.get("required", False):
             return ActionResult(status=ActionStatus.SKIPPED, action=action, message=skip_msg)
         return self._fail(action, skip_msg)
+
+    def _tap_ocr_pattern(self, action: dict) -> ActionResult:
+        """
+        Scan the screen with OCR and tap the first text matching ocr_pattern (regex).
+        Useful for tapping a progress counter like "0/5" when no template exists —
+        e.g. the first available research showing a {number}/{number} sequence.
+
+        Parameters
+        ----------
+        ocr_pattern    : Python regex matched against OCR text (required)
+        region         : optional (x1, y1, x2, y2) pixel region to limit OCR
+        min_confidence : OCR confidence floor (default 0.3)
+        required       : if True, ABORT_TASK when nothing matches; else SKIPPED (default False)
+        log_skip       : message logged when nothing matches
+        """
+        import re as _re
+
+        ocr_pattern = action.get("ocr_pattern")
+        if not ocr_pattern:
+            return self._fail(action, "tap_ocr_pattern requires 'ocr_pattern'")
+
+        region   = action.get("region", None)
+        min_conf = float(action.get("min_confidence", 0.3))
+        screenshot = self.bot.screenshot()
+        ocr_results = self.vision.read_text(screenshot, region=region, min_confidence=min_conf)
+        pattern = _re.compile(ocr_pattern)
+
+        for r in ocr_results:
+            if pattern.search(r.text):
+                self._log(f"  [tap_ocr_pattern] match '{r.text}' at ({r.x}, {r.y})")
+                self.bot.tap(r.x, r.y)
+                return self._ok(action, f"tap_ocr_pattern: tapped '{r.text}' at ({r.x}, {r.y})")
+
+        skip_msg = action.get("log_skip", f"tap_ocr_pattern: no OCR match for '{ocr_pattern}'")
+        if self.log_callback:
+            self.log_callback(f"  ⏭ {skip_msg}")
+        if action.get("required", False):
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=skip_msg)
+        return ActionResult(status=ActionStatus.SKIPPED, action=action, message=skip_msg)
 
     def _verify_setting_template(self, action: dict) -> ActionResult:
         """

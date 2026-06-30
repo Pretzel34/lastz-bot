@@ -4,7 +4,8 @@
     {
       "action": "if_template_tap",
       "template": "btn_enter_hero.png",
-      "required": false
+      "fallback_template": "btn_enter_hero_alt.png",
+      "required": true
     },
     {
       "action": "wait",
@@ -44,7 +45,8 @@
           "fallback_templates": [
             "btn_click_next_hero_alt.png",
             "btn_click_next_hero_alt_alt.png",
-            "btn_click_next_hero_alt_alt_alt.png"
+            "btn_click_next_hero_alt_alt_alt.png",
+            "btn_click_next_hero_alt_alt_alt_last"
           ],
           "required": false,
           "skip_task_if_not_found": true,

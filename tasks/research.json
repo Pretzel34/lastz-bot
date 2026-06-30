@@ -1,0 +1,97 @@
+{
+  "name": "research",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_to_world_view.png",
+      "world_btn": "btn_go_to_hq_view.png",
+      "note": "Ensure HQ view before task"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_research_icon.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_found",
+      "template": "btn_research_in_progress_cancel.png",
+      "log_found": "Research in Progress \u00e2\u20ac\u201d stopping task",
+      "on_found": [
+        {
+          "action": "tap_template",
+          "template": "btn_research_in_progress_cancel.png",
+          "required": false,
+          "note": "Tap the in-progress / cancel button"
+        }
+      ],
+      "log_skip": "No research in progress \u00e2\u20ac\u201d continuing to research selection"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_template",
+      "template": "btn_press_back.png",
+      "fallback_template": "btn_back_out_of_page.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_selected_research",
+      "max_scrolls": 1,
+      "note": "Find the research chosen in the Research In dropdown; scroll down once if needed, else stop the task"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_ocr_pattern",
+      "ocr_pattern": "\\d+\\s*/\\s*\\d+",
+      "required": false,
+      "note": "Tap the first available research showing a {number}/{number} progress count"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_research_start.png",
+      "required": false,
+      "note": "Start the selected research"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_research_ally_assist.png",
+      "required": false,
+      "note": "Request alliance help on the research"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_press_back.png",
+      "required": false,
+      "note": "Back out — research task complete"
+    }
+  ]
+}

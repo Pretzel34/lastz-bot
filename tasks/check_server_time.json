@@ -2,26 +2,55 @@
   "name": "check_server_time",
   "actions": [
     {
-      "action": "if_template_tap",
-      "template": "btn_board_time.png",
-      "required": false
+      "action": "skip_if_server_time_fresh",
+      "note": "Skip if server time was recorded within the last 24 hours"
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_board_time.png",
+        "btn_board_time_alt.png"
+      ],
+      "required": true,
+      "note": "Open the Apocalypse Time panel"
     },
     {
       "action": "wait",
       "seconds": 4.0
     },
     {
+      "action": "tap_zone",
+      "x_pct": 33.1,
+      "y_pct": 82.8,
+      "note": "Ensure In Calender"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "ensure_server_time_mode",
+      "note": "Guarantee panel is showing server time before reading"
+    },
+    {
       "action": "read_server_time"
+    },
+    {
+      "action": "ensure_local_time_mode",
+      "note": "Switch panel to local time"
+    },
+    {
+      "action": "read_local_time"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
     },
     {
       "action": "if_template_tap",
       "template": "btn_server_time_close.png",
       "required": false,
-      "note": "Close the Apocalypse Time panel"
-    },
-    {
-      "action": "wait",
-      "seconds": 2.0
+      "note": "Close the panel"
     }
   ]
 }

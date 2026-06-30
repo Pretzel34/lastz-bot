@@ -2,8 +2,8 @@
   "name": "check_event_calander",
   "actions": [
     {
-      "action": "skip_if_fp_cycle_current",
-      "note": "Skip entire task \u00e2\u20ac\u201d schedule already captured for this week"
+      "action": "skip_if_fp_event_current",
+      "note": "Skip if the current FP event slot is still active (re-captures when expired)"
     },
     {
       "action": "ensure_hq_view",
@@ -35,7 +35,7 @@
           "action": "if_template_tap",
           "template": "btn_full_prepardness_icon.png",
           "required": false,
-          "log_success": "Full Preparedness icon found \u00e2\u20ac\u201d tapping to open",
+          "log_success": "Full Preparedness icon found — tapping to open",
           "on_not_found": [
             {
               "action": "scroll_left",
@@ -43,7 +43,7 @@
               "distance_pct": 60,
               "start_x_pct": 20.0,
               "start_y_pct": 92.0,
-              "note": "Tab not visible \u00e2\u20ac\u201d scroll left to find it"
+              "note": "Tab not visible — scroll left to find it"
             },
             {
               "action": "wait",
@@ -67,7 +67,7 @@
           "action": "if_template_tap",
           "template": "btn_full_prepardness_schedule.png",
           "required": false,
-          "note": "Schedule tab should now be visible \u00e2\u20ac\u201d tap it"
+          "note": "Schedule tab should now be visible — tap it"
         }
       ]
     },
@@ -76,8 +76,8 @@
       "seconds": 3.0
     },
     {
-      "action": "read_fp_schedule",
-      "note": "OCR the calendar \u00e2\u20ac\u201d scrolls automatically to capture all 7 days; self-skips if this week is already stored"
+      "action": "read_current_fp_event",
+      "note": "OCR the green-highlighted row to capture the currently active FP event"
     },
     {
       "action": "if_template_tap",

@@ -13,7 +13,7 @@
     },
     {
       "action": "dispatch_fp_task",
-      "note": "Reads fp_schedule.json + current server time to determine and run the active child task"
+      "note": "Reads fp_current_event.json to determine and run the active child task"
     },
     {
       "action": "wait",
