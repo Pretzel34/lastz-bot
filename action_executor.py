@@ -1342,43 +1342,60 @@ class ActionExecutor:
     # Server-time / daily task helpers
     # ------------------------------------------------------------------
 
-    def _detect_time_panel_mode(self) -> str:
+    def _detect_time_panel_mode(self, retries: int = 3) -> str:
         """
-        OCR the time panel and return 'server', 'local', or 'unknown'.
+        OCR the time panel title and return 'server', 'local', or 'unknown'.
 
-        Detects mode by checking for known title strings in the center band.
+        Server view title = 'Apocalypse Time', local view = 'Local Time'. The
+        stylized title OCRs inconsistently, so match loosely (case-insensitive
+        fragments) and retry on a fresh frame before giving up — an 'unknown'
+        here would otherwise let us capture and mislabel the wrong view.
         NOTE: title strings are English-only for now — will read from a language
         config once the first-run language selection system is implemented.
         """
-        ss = self.bot.screenshot()
-        w, h = ss.size
-        time_region = (int(w * 0.20), int(h * 0.30), int(w * 0.80), int(h * 0.42))
-        raw = " ".join(r.text for r in self.vision.read_text(ss, region=time_region, min_confidence=0.3))
-        if "Apocalypse" in raw:
-            return "server"
-        if "Local" in raw:
-            return "local"
+        import time as _time
+        for _ in range(max(1, retries)):
+            ss = self.bot.screenshot()
+            w, h = ss.size
+            time_region = (int(w * 0.15), int(h * 0.27), int(w * 0.85), int(h * 0.44))
+            raw = " ".join(r.text for r in self.vision.read_text(
+                ss, region=time_region, min_confidence=0.3)).lower()
+            if "local" in raw:
+                return "local"
+            if any(frag in raw for frag in ("apocal", "pocaly", "calypse", "apoca")):
+                return "server"
+            _time.sleep(0.8)
         return "unknown"
 
     def _ensure_time_mode(self, action: dict, target: str) -> ActionResult:
-        """Shared logic for ensure_server_time_mode and ensure_local_time_mode."""
+        """
+        Guarantee the time panel is showing the target view ('server' or
+        'local'). Detect the current mode and toggle btn_alternate_time until it
+        matches. An 'unknown' read no longer passes silently — we re-detect and
+        toggle so we never capture (and mislabel) the wrong view.
+        """
         import time as _time
-        mode = self._detect_time_panel_mode()
-        if self.log_callback:
-            self.log_callback(f"  [time_mode] detected='{mode}' target='{target}'")
-        if mode == target or mode == "unknown":
-            return self._ok(action, f"ensure_{target}_time_mode: already in {mode} mode")
-        # Wrong mode — tap the toggle
         tmpl = "btn_alternate_time.png"
-        result = self.vision.find_template(self.bot.screenshot(), self._template_path(tmpl))
-        if result and result.confidence >= 0.8:
+        for attempt in range(3):
+            mode = self._detect_time_panel_mode()
+            if self.log_callback:
+                self.log_callback(f"  [time_mode] attempt {attempt + 1}: detected='{mode}' target='{target}'")
+            if mode == target:
+                return self._ok(action, f"ensure_{target}_time_mode: in {target} mode")
+            # Opposite mode OR unknown — tap the toggle and re-check next loop.
+            result = self.vision.find_template(self.bot.screenshot(), self._template_path(tmpl))
+            if not (result and result.confidence >= 0.8):
+                return self._fail(action,
+                    f"ensure_{target}_time_mode: '{tmpl}' not found to toggle (mode={mode})")
             self.bot.tap(result.x, result.y)
             _time.sleep(2.0)
             if self.log_callback:
-                self.log_callback(f"  [time_mode] toggled to {target} mode")
-        else:
-            return self._fail(action, f"ensure_{target}_time_mode: '{tmpl}' not found to toggle")
-        return self._ok(action, f"ensure_{target}_time_mode: switched from {mode} to {target}")
+                self.log_callback(f"  [time_mode] toggled (was {mode}) — re-checking")
+        mode = self._detect_time_panel_mode()
+        if mode == target:
+            return self._ok(action, f"ensure_{target}_time_mode: in {target} mode")
+        return self._fail(action,
+            f"ensure_{target}_time_mode: could not reach {target} mode (last={mode})")
 
     def _ensure_server_time_mode(self, action: dict) -> ActionResult:
         """If panel is in local time mode, tap the toggle to switch to server time."""
@@ -1388,18 +1405,34 @@ class ActionExecutor:
         """If panel is in server time mode, tap the toggle to switch to local time."""
         return self._ensure_time_mode(action, "local")
 
-    def _ocr_time_panel(self, action: dict, label: str, save_file: str) -> ActionResult:
+    def _ocr_time_panel(self, action: dict, label: str, save_file: str,
+                        expected_mode: str = None) -> ActionResult:
         """
         Shared OCR helper for both read_server_time and read_local_time.
         Reads the Apocalypse Time panel (server or local view) and saves results.
 
-          label     : log prefix, e.g. "server_time" or "local_time"
-          save_file : filename under logs/, e.g. "server_time.json" or "local_time.json"
+          label         : log prefix, e.g. "server_time" or "local_time"
+          save_file     : filename under logs/, e.g. "server_time.json"
+          expected_mode : 'server' or 'local' — if set, confirm the panel is
+                          actually showing that view before saving, so a local
+                          reading is never stored as server time (or vice-versa).
         """
         import re as _re
         import json as _json
         from datetime import datetime as _dt
         from pathlib import Path as _Path
+
+        # Verify we are about to record the view we intend to. Guards against the
+        # panel defaulting to local time when we asked for server time.
+        if expected_mode:
+            actual = self._detect_time_panel_mode()
+            if actual != "unknown" and actual != expected_mode:
+                if self.log_callback:
+                    self.log_callback(
+                        f"  [{label}] panel shows {actual} time but expected "
+                        f"{expected_mode} — skipping to avoid mislabel")
+                return self._fail(action,
+                    f"{label}: panel showing {actual} time, expected {expected_mode}")
 
         ss = self.bot.screenshot()
         w, h = ss.size
@@ -1467,7 +1500,7 @@ class ActionExecutor:
 
     def _read_server_time(self, action: dict) -> ActionResult:
         """OCR the Apocalypse Time screen (server time view) and save to logs/server_time.json."""
-        result = self._ocr_time_panel(action, "server_time", "server_time.json")
+        result = self._ocr_time_panel(action, "server_time", "server_time.json", expected_mode="server")
         if isinstance(result, ActionResult):
             return result
         server_date, server_time, now = result
@@ -1478,7 +1511,7 @@ class ActionExecutor:
 
     def _read_local_time(self, action: dict) -> ActionResult:
         """OCR the Apocalypse Time screen (local time view) and save to logs/local_time.json."""
-        result = self._ocr_time_panel(action, "local_time", "local_time.json")
+        result = self._ocr_time_panel(action, "local_time", "local_time.json", expected_mode="local")
         if isinstance(result, ActionResult):
             return result
         local_date, local_time, now = result
@@ -2269,6 +2302,21 @@ class ActionExecutor:
         }
         allowed_templates = QUALITY_MAP.get(allowed, QUALITY_MAP["All"])
 
+        def _ensure_on_list():
+            """Normalize back to the My Trucks list before returning, so the
+            caller's loop can find the next truck. On a successful send the GO
+            tap already returns to the list (no-op here); on a skip the quality
+            panel is still open and needs one back-tap to dismiss. Detecting the
+            list via btn_send_truck makes this correct for both cases."""
+            time.sleep(1.5)
+            ss = self.bot.screenshot()
+            if self.vision.find_template(ss, self._template_path("btn_send_truck.png")):
+                return  # already on the My Trucks list
+            bp = self.vision.find_template(ss, self._template_path("btn_press_back.png"))
+            if bp:
+                self.bot.tap(bp.x, bp.y)
+                time.sleep(2.0)
+
         for attempt in range(max_refreshes + 1):
             if self._stop_event and self._stop_event.is_set():
                 return self._ok(action, "check_truck_quality: stop requested")
@@ -2295,6 +2343,7 @@ class ActionExecutor:
                 go_match = self.vision.find_template(go_screenshot, go_path)
                 if go_match:
                     self.bot.tap(go_match.x, go_match.y)
+                    _ensure_on_list()
                     return self._ok(action, f"check_truck_quality: matched '{matched}' — truck sent")
                 # GO not visible — check if formation needs to be saved first
                 escort_path = self._template_path("btn_deploy_escort_truck.png")
@@ -2321,13 +2370,16 @@ class ActionExecutor:
                     go_match2 = self.vision.find_template(go_ss2, go_path)
                     if go_match2:
                         self.bot.tap(go_match2.x, go_match2.y)
+                        _ensure_on_list()
                         return self._ok(action,
                             f"check_truck_quality: matched '{matched}' — formation saved, truck sent")
                     self.log_callback and self.log_callback(
                         "  [check_truck_quality] btn_truck_go still not visible after save — skipping")
+                    _ensure_on_list()
                     return self._ok(action, "check_truck_quality: GO not found after save sequence — skipping")
                 self.log_callback and self.log_callback(
                     "  [check_truck_quality] btn_truck_go not visible — skipping send")
+                _ensure_on_list()
                 return self._ok(action, "check_truck_quality: GO button not found — skipping")
 
             # No match on this attempt
@@ -2344,6 +2396,7 @@ class ActionExecutor:
                         "  [check_truck_quality] btn_truck_refresh not on screen — stopping early")
                     break
 
+        _ensure_on_list()
         return self._ok(action,
             f"check_truck_quality: no qualifying truck after {max_refreshes} refresh(es) "
             f"(allowed='{allowed}') — skipped")
@@ -2461,6 +2514,36 @@ class ActionExecutor:
             m = _re.search(r'Lv\.\d+\s*(.+?)\s+[\d,]{5,}', raw)
             return m.group(1).strip() if m else ""
 
+        import difflib as _difflib
+
+        def _norm_name(raw_name: str) -> str:
+            """Collapse OCR noise so the same player matches across passes:
+            keep only letters/digits, uppercase. e.g. '[x969]LOGAN IIII' and
+            '[x969JLOGAN IIII 3' both reduce to comparable forms."""
+            return _re.sub(r'[^A-Za-z0-9]', '', raw_name or '').upper()
+
+        def _name_is_skipped(raw_name: str) -> bool:
+            """True if this player closely matches one already on the skip list.
+            Uses a fuzzy ratio + containment so OCR drift (punctuation read as
+            letters, stray trailing chars) doesn't defeat the skip."""
+            n = _norm_name(raw_name)
+            if len(n) < 4:
+                return False
+            for s in self._truck_attack_skip_names:
+                if n == s:
+                    return True
+                if min(len(n), len(s)) >= 6 and (n in s or s in n):
+                    return True
+                if _difflib.SequenceMatcher(None, n, s).ratio() >= 0.82:
+                    return True
+            return False
+
+        def _add_skip(raw_name: str):
+            """Add a player to the skip list in normalized form."""
+            n = _norm_name(raw_name)
+            if len(n) >= 4:
+                self._truck_attack_skip_names.add(n)
+
         def _tap_template(tmpl_name, screenshot=None) -> bool:
             if screenshot is None:
                 screenshot = self.bot.screenshot()
@@ -2469,6 +2552,29 @@ class ActionExecutor:
                 self.bot.tap(m.x, m.y)
                 return True
             return False
+
+        def _select_top_formation(ss=None) -> float:
+            """Empty formation recovery: our power reads 0 because no troops are
+            selected. Tap the top row of hero portraits (strongest, listed first)
+            to fill the squad, then re-read and return our power so the caller can
+            re-validate. Only call when our_pw == 0 (all slots empty)."""
+            # Top-row hero slots in the roster grid, as fractions of screen W/H
+            # (measured on the canonical 540x960 pre-fight screen).
+            cols  = [0.176, 0.339, 0.502, 0.665, 0.828]
+            row_y = 0.726
+            if ss is None:
+                ss = self.bot.screenshot()
+            w, h = ss.size
+            for cx in cols:
+                self.bot.tap(int(w * cx), int(h * row_y))
+                time.sleep(0.6)
+            time.sleep(1.5)
+            new_ss = self.bot.screenshot()
+            left = " ".join(r.text for r in self.vision.read_text(
+                new_ss,
+                region=(int(w * 0.10), int(h * 0.01), int(w * 0.45), int(h * 0.08)),
+                min_confidence=0.3))
+            return _parse_power(left)
 
         def _open_first_truck() -> bool:
             """Tap any visible truck icon to open its detail panel. Returns True on success."""
@@ -2482,7 +2588,37 @@ class ActionExecutor:
                     return True
             return False
 
+        def _return_home():
+            """Best-effort cleanup so the NEXT task (e.g. bounties) starts from a
+            clean HQ view. Truck Attack can finish sitting in a post-fight overlay
+            or the Other Trucks overview, where the bounty entry icon isn't visible.
+            Dismiss any post-fight screen, back out to the world view, then return
+            to HQ."""
+            for _ in range(2):
+                ss = self.bot.screenshot()
+                if self.vision.find_template(
+                        ss, self._template_path("btn_post_fight_continue.png")):
+                    _tap_template("btn_post_fight_continue.png", ss)
+                    time.sleep(2.0)
+                else:
+                    break
+            for _ in range(3):
+                ss = self.bot.screenshot()
+                if self.vision.find_template(
+                        ss, self._template_path("btn_go_to_hq_view_universal.png")):
+                    break  # reached world view
+                if not _tap_template("btn_back.png", ss):
+                    break
+                time.sleep(1.5)
+            ss = self.bot.screenshot()
+            if self.vision.find_template(
+                    ss, self._template_path("btn_go_to_hq_view_universal.png")):
+                _dbg("  [truck_attack] returning to HQ view")
+                _tap_template("btn_go_to_hq_view_universal.png", ss)
+                time.sleep(2.0)
+
         if not _open_first_truck():
+            _return_home()
             return ActionResult(
                 status=ActionStatus.ABORT_TASK,
                 action=action,
@@ -2518,7 +2654,7 @@ class ActionExecutor:
                     continue
 
                 # Skip players we already know we can't beat
-                if player_name and player_name in self._truck_attack_skip_names:
+                if player_name and _name_is_skipped(player_name):
                     _dbg(f"  [truck_attack] skipping '{player_name}' (outmatched previously)")
                     if not _tap_template("btn_next_truck.png"):
                         break
@@ -2630,11 +2766,38 @@ class ActionExecutor:
                 _dbg(f"  [truck_attack] PRE-fight power check — ours={our_pw:,.0f} theirs={their_pw:,.0f}")
                 _dbg(f"  [truck_attack] PRE-fight OCR left='{left_raw}'  right='{right_raw}'")
 
+                # our power == 0 with a readable enemy means the formation is
+                # EMPTY (no troops selected), not an OCR failure. Fill the squad
+                # from the top of the roster and re-read before deciding.
+                if our_pw == 0 and their_pw > 0:
+                    _dbg("  [truck_attack] our power=0 — formation empty, selecting top heroes")
+                    our_pw = _select_top_formation(pre_fight_ss)
+                    _dbg(f"  [truck_attack] post-select power check — ours={our_pw:,.0f} theirs={their_pw:,.0f}")
+
+                # Our side reads fine but the enemy side is empty → there is no
+                # enemy formation to fight, i.e. we are OUT OF ATTACKS. The matched
+                # truck keeps reappearing, so stop the whole loop instead of
+                # rescanning forever (the skip-list can't catch it — the name OCR
+                # drifts every pass).
+                if our_pw > 0 and their_pw == 0:
+                    _dbg("  [truck_attack] enemy power empty — out of attacks, stopping loop")
+                    _tap_template("btn_back.png", pre_fight_ss)
+                    time.sleep(2.0)
+                    self._truck_attack_count = 0
+                    self._truck_attack_skip_names = set()
+                    self._mark_done_today({"task_key": "truck_attack"})
+                    _return_home()
+                    return ActionResult(
+                        status=ActionStatus.ABORT_TASK,
+                        action=action,
+                        message="execute_truck_attack: out of attacks (enemy power empty)",
+                    )
+
                 # Back off if OCR failed to read either side — never fight blind
                 if our_pw == 0 or their_pw == 0:
-                    _dbg("  [truck_attack] power OCR failed (one or both sides = 0) — backing off, restarting scan")
+                    _dbg("  [truck_attack] power unreadable/empty (one or both sides = 0) — backing off, restarting scan")
                     if player_name:
-                        self._truck_attack_skip_names.add(player_name)
+                        _add_skip(player_name)
                         _dbg(f"  [truck_attack] added '{player_name}' to skip list (OCR fail — {len(self._truck_attack_skip_names)} skipped)")
                     _tap_template("btn_back.png", pre_fight_ss)
                     time.sleep(2.0)
@@ -2645,7 +2808,7 @@ class ActionExecutor:
                 if their_pw > our_pw:
                     _dbg("  [truck_attack] outmatched — backing off, restarting scan")
                     if player_name:
-                        self._truck_attack_skip_names.add(player_name)
+                        _add_skip(player_name)
                         _dbg(f"  [truck_attack] added '{player_name}' to skip list ({len(self._truck_attack_skip_names)} skipped total)")
                     _tap_template("btn_back.png", pre_fight_ss)
                     time.sleep(2.0)
@@ -2653,16 +2816,30 @@ class ActionExecutor:
                     time.sleep(2.0)
                     break  # restart scan from slot 1
 
-                # Power ok — now tap Fight (commits immediately, no confirmation)
+                # Power ok — now tap Fight (commits immediately, no confirmation).
+                # Re-check once on a fresh screenshot in case the screen was
+                # mid-render before concluding the button is genuinely absent.
                 _dbg("  [truck_attack] power ok — tapping Fight")
-                if not _tap_template("btn_other_truck_fight.png", pre_fight_ss):
-                    _dbg("  [truck_attack] Fight button not visible — backing off")
+                _fought = _tap_template("btn_other_truck_fight.png", pre_fight_ss)
+                if not _fought:
+                    time.sleep(1.5)
+                    _fought = _tap_template("btn_other_truck_fight.png", self.bot.screenshot())
+                if not _fought:
+                    # No Fight button on a matched, plundered target = we cannot
+                    # initiate a fight, i.e. OUT OF ATTACKS. Stop the whole loop
+                    # instead of backing off and rescanning the same truck forever.
+                    _dbg("  [truck_attack] Fight button not visible — out of attacks, stopping loop")
                     _tap_template("btn_back.png", self.bot.screenshot())
                     time.sleep(2.0)
-                    if not _tap_template("btn_next_truck.png"):
-                        break
-                    time.sleep(1.5)
-                    continue
+                    self._truck_attack_count = 0
+                    self._truck_attack_skip_names = set()
+                    self._mark_done_today({"task_key": "truck_attack"})
+                    _return_home()
+                    return ActionResult(
+                        status=ActionStatus.ABORT_TASK,
+                        action=action,
+                        message="execute_truck_attack: out of attacks (Fight button not visible)",
+                    )
 
                 time.sleep(2.0)
                 fight_ss = self.bot.screenshot()
@@ -2673,18 +2850,39 @@ class ActionExecutor:
 
                 _dbg("  [truck_attack] fight started — tapping Fight Continue")
                 _tap_template("btn_other_truck_fight_cont.png", fight_ss)
-                time.sleep(20.0)
+
+                # Conditional battle wait. If a fast-forward button is available,
+                # skip the long wait: tap it, give the battle a moment, then
+                # continue. Otherwise wait out the battle (up to fight_timeout)
+                # before continuing. Either way we finish on btn_post_fight_continue
+                # to dismiss the results and return to the truck view.
+                fight_timeout = float(trucks_cfg.get("fight_timeout_sec", 120))
+                time.sleep(2.0)  # let the battle screen render the fast-forward button
+                if self.vision.find_template(
+                        self.bot.screenshot(), self._template_path("btn_fast_forward_fight.png")):
+                    _dbg("  [truck_attack] fast-forward available — skipping wait")
+                    _tap_template("btn_fast_forward_fight.png", self.bot.screenshot())
+                    time.sleep(5.0)
+                else:
+                    _dbg(f"  [truck_attack] no fast-forward — waiting up to {fight_timeout:.0f}s")
+                    _deadline = time.time() + fight_timeout
+                    while time.time() < _deadline:
+                        if self._stop_event and self._stop_event.is_set():
+                            return self._ok(action, "execute_truck_attack: stop requested")
+                        time.sleep(2.0)
+
+                _dbg("  [truck_attack] tapping post-fight continue")
+                _tap_template("btn_post_fight_continue.png", self.bot.screenshot())
+                time.sleep(2.0)
+
                 self._truck_attack_count += 1
-                _dbg(f"  [truck_attack] fight complete ({self._truck_attack_count}/4) — navigating back")
-                _tap_template("btn_back.png", self.bot.screenshot())
-                time.sleep(1.5)
-                _tap_template("btn_back.png", self.bot.screenshot())
-                time.sleep(1.5)
+                _dbg(f"  [truck_attack] fight complete ({self._truck_attack_count}/4) — returning")
                 if self._truck_attack_count >= 4:
                     _dbg("  [truck_attack] 4 attacks complete — stopping loop")
                     self._truck_attack_count = 0
                     self._truck_attack_skip_names = set()
                     self._mark_done_today({"task_key": "truck_attack"})
+                    _return_home()
                     return ActionResult(
                         status=ActionStatus.ABORT_TASK,
                         action=action,
@@ -2695,6 +2893,13 @@ class ActionExecutor:
             # Inner loop ended (slots exhausted or break after fight/back-off) — refresh for next cycle
             if attempt < max_attempts - 1:
                 _dbg("  [truck_attack] refreshing truck list for next cycle")
+                # Debug: capture the screen we're on when looking for refresh,
+                # so we can see where the post-fight back-taps actually land.
+                try:
+                    self.bot.screenshot().save(str(_debug_log.parent / "refresh_screen.png"))
+                    _dbg("  [truck_attack] saved refresh_screen.png")
+                except Exception:
+                    pass
                 if not _tap_template("btn_other_truck_refresh.png"):
                     _dbg("  [truck_attack] refresh button not found — stopping")
                     break
@@ -2703,6 +2908,7 @@ class ActionExecutor:
                     _dbg("  [truck_attack] no trucks after refresh — stopping")
                     break
 
+        _return_home()
         return self._ok(action,
             f"execute_truck_attack: no target found after {max_attempts} cycle(s)")
 

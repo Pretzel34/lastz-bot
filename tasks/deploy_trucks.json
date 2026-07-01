@@ -74,21 +74,13 @@
           "seconds": 4.0
         },
         {
-          "action": "check_truck_quality"
+          "action": "check_truck_quality",
+          "note": "Sends or skips the truck and normalizes back to the My Trucks list"
         },
         {
           "action": "wait",
-          "seconds": 2.0
-        },
-        {
-          "action": "if_template_tap",
-          "template": "btn_press_back.png",
-          "required": false,
-          "note": "Dismiss quality selection panel if truck was skipped or sent"
-        },
-        {
-          "action": "wait",
-          "seconds": 3.0
+          "seconds": 3.0,
+          "note": "Let the My Trucks list reload before the next loop check"
         }
       ]
     }

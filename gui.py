@@ -1384,6 +1384,11 @@ class BotApp(ctk.CTk):
     # PAGE: Farm Stats
     # ══════════════════════════════════════════════════════════════════════
 
+    # Session Overview table columns (kept in one place so header + rows align).
+    _STATS_COLUMNS = ["Farm", "Emu ID", "Status", "Runtime", "Actions",
+                      "Success %", "Tasks", "Server Time", "Local Time"]
+    _STATS_COL_W = 120
+
     def _build_page_farm_stats(self):
         pg = self.pages["farm_stats"]
         self._page_header(pg, "📊  Farm Stats",
@@ -1392,59 +1397,54 @@ class BotApp(ctk.CTk):
         scroll = ctk.CTkScrollableFrame(pg, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=16, pady=8)
 
-        time_card = self._card(scroll, "Server Time")
-        self._server_time_label = ctk.CTkLabel(
-            time_card, text="—", font=FM, text_color=C["text2"])
-        self._server_time_label.pack(anchor="w", padx=8, pady=(0, 6))
-        self._refresh_server_time_label()
-
         card = self._card(scroll, "Session Overview")
 
-        hrow = ctk.CTkFrame(card, fg_color=C["panel2"], corner_radius=4)
-        hrow.pack(fill="x", pady=(0, 4))
-        for col in ["Farm", "Emu ID", "Status", "Runtime", "Actions", "Success %", "Tasks"]:
-            ctk.CTkLabel(hrow, text=col, font=FB,
-                         text_color=C["accent"], width=110).pack(side="left", padx=6, pady=6)
+        # Horizontally scrollable table so columns can keep being added.
+        table_h = min(38 * (len(self.farms) + 1) + 16, 620)
+        self._stats_hscroll = ctk.CTkScrollableFrame(
+            card, orientation="horizontal", fg_color="transparent", height=table_h)
+        self._stats_hscroll.pack(fill="x", expand=False)
 
-        self.stats_rows_frame = ctk.CTkFrame(card, fg_color="transparent")
-        self.stats_rows_frame.pack(fill="x")
+        hrow = ctk.CTkFrame(self._stats_hscroll, fg_color=C["panel2"], corner_radius=4)
+        hrow.pack(anchor="w", pady=(0, 4))
+        for col in self._STATS_COLUMNS:
+            ctk.CTkLabel(hrow, text=col, font=FB,
+                         text_color=C["accent"], width=self._STATS_COL_W).pack(
+                             side="left", padx=6, pady=6)
+
+        self.stats_rows_frame = ctk.CTkFrame(self._stats_hscroll, fg_color="transparent")
+        self.stats_rows_frame.pack(anchor="w")
         self._refresh_stats_table()
 
         self._btn(scroll, "⟳ Refresh", self._refresh_stats_table,
                   C["accent"]).pack(anchor="e", pady=8)
 
-    def _refresh_server_time_label(self):
+    def _read_time_brief(self, filename):
+        """Compact 'MM-DD HH:MM:SS' for a logs/<time>.json file, or '—'."""
         import json as _json
-        from datetime import datetime as _dt
         from pathlib import Path as _Path
-
-        def _read(filename):
-            try:
-                data = _json.loads(_Path(f"logs/{filename}").read_text())
-                date = data.get("date", "")
-                time = data.get("time", "")
-                recorded = _dt.fromisoformat(data.get("recorded_at", ""))
-                age_min = int((_dt.now() - recorded).total_seconds() // 60)
-                age_str = f"{age_min}m ago" if age_min < 60 else f"{age_min // 60}h {age_min % 60}m ago"
-                return f"{date}  {time}  ({age_str})"
-            except Exception:
-                return "—"
-
-        server = _read("server_time.json")
-        local  = _read("local_time.json")
-        self._server_time_label.configure(
-            text=f"Server:  {server}\nLocal:    {local}"
-        )
+        try:
+            data = _json.loads(_Path(f"logs/{filename}").read_text())
+            date = data.get("date", "")
+            t = data.get("time", "")
+            parts = date.split("-")
+            short_date = "-".join(parts[1:]) if len(parts) == 3 else date
+            return f"{short_date} {t}".strip() or "—"
+        except Exception:
+            return "—"
 
     def _refresh_stats_table(self):
-        self._refresh_server_time_label()
         for w in self.stats_rows_frame.winfo_children():
             w.destroy()
+        # Server time is global to the game server; local time is per-device.
+        # Until per-farm capture is wired up, show the latest recorded values.
+        server_t = self._read_time_brief("server_time.json")
+        local_t  = self._read_time_brief("local_time.json")
         for farm in self.farms:
             engine = self.engines.get(farm["emu_index"])
             row = ctk.CTkFrame(self.stats_rows_frame, fg_color=C["card"],
                                 corner_radius=4, border_width=1, border_color=C["border"])
-            row.pack(fill="x", pady=2)
+            row.pack(anchor="w", pady=2)
             vals = [
                 farm["name"],
                 str(farm["emu_index"]),
@@ -1453,10 +1453,13 @@ class BotApp(ctk.CTk):
                 f"{engine.stats.actions_succeeded}/{engine.stats.actions_run}" if engine else "—",
                 f"{engine.stats.success_rate:.0f}%" if engine else "—",
                 str(engine.stats.tasks_completed) if engine else "—",
+                server_t,
+                local_t,
             ]
             for v in vals:
                 ctk.CTkLabel(row, text=v, font=FM,
-                             text_color=C["text2"], width=110).pack(side="left", padx=6, pady=6)
+                             text_color=C["text2"], width=self._STATS_COL_W).pack(
+                                 side="left", padx=6, pady=6)
 
     # ══════════════════════════════════════════════════════════════════════
     # PAGE: Restore / Backup
@@ -2492,7 +2495,11 @@ class BotApp(ctk.CTk):
         }
 
         default_order = [c["key"] for c in TASK_CATEGORIES]
-        for cat_key in farm.get("task_cat_order", default_order):
+        order = list(farm.get("task_cat_order", default_order))
+        # Append any categories missing from a saved order (e.g. trucks/research
+        # added after the order was persisted) so new task types always run.
+        order += [k for k in default_order if k not in order]
+        for cat_key in order:
             if cat_key in _builders:
                 _builders[cat_key]()
 

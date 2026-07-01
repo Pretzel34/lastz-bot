@@ -76,6 +76,15 @@
       "action": "if_template_tap",
       "template": "btn_back_out_of_page.png",
       "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "verify_in_hq",
+      "required": false,
+      "note": "State-aware world->HQ return so the next task starts in HQ view"
     }
   ]
 }

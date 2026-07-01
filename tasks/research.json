@@ -26,10 +26,30 @@
       "log_found": "Research in Progress \u00e2\u20ac\u201d stopping task",
       "on_found": [
         {
-          "action": "tap_template",
+          "action": "if_template_tap",
+          "template": "btn_complete_research.png",
+          "required": false,
+          "note": "Research finished — claim the completed research if present"
+        },
+        {
+          "action": "wait",
+          "seconds": 3.0
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_post_complete_research.png",
+          "required": false,
+          "note": "If a post-complete prompt appears, claim it"
+        },
+        {
+          "action": "wait",
+          "seconds": 3.0
+        },
+        {
+          "action": "if_template_tap",
           "template": "btn_research_in_progress_cancel.png",
           "required": false,
-          "note": "Tap the in-progress / cancel button"
+          "note": "Otherwise cancel the in-progress research and continue as usual"
         }
       ],
       "log_skip": "No research in progress \u00e2\u20ac\u201d continuing to research selection"
