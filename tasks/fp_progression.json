@@ -1,0 +1,11 @@
+{
+  "name": "fp_progression",
+  "actions": [
+    {
+      "action": "loop_task",
+      "task": "fp_research_cycle.json",
+      "max_iterations": 3,
+      "note": "Loop research -> reward claim 3x to advance FP milestones (fp_reward_collection unchanged)"
+    }
+  ]
+}

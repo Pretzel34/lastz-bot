@@ -885,6 +885,7 @@ class ActionExecutor:
           skip_task_if_not_found: true       — aborts the whole task with a log message if not found
           exhaust_rallies_if_not_found: true — sets rally counter to max so no further rallies run,
                                                then aborts the current task
+          skip_to_on_found: N                — after tapping, jump to step N (1-indexed) of the task
           log_success: "My message"          — custom log message on success
           log_skip: "My message"             — custom log message when skipped
         """
@@ -979,7 +980,11 @@ class ActionExecutor:
             msg = action.get("log_success", default_msg)
             if self.log_callback:
                 self.log_callback(f"  ✓ {msg}")
-            return self._ok(action, msg)
+            result = self._ok(action, msg)
+            skip_to_step = action.get("skip_to_on_found")
+            if skip_to_step is not None:
+                result.skip_to = int(skip_to_step) - 1
+            return result
 
         # Not found — check for fuel-empty fallback before giving up
         fuel_template = action.get("fuel_template")
@@ -1010,7 +1015,11 @@ class ActionExecutor:
                         msg = action.get("log_success", f"Found and tapped '{tmpl}' after refuelling")
                         if self.log_callback:
                             self.log_callback(f"  ✓ {msg}")
-                        return self._ok(action, msg)
+                        result = self._ok(action, msg)
+                        skip_to_step = action.get("skip_to_on_found")
+                        if skip_to_step is not None:
+                            result.skip_to = int(skip_to_step) - 1
+                        return result
                 if self.log_callback:
                     self.log_callback(f"  ✗ March still not found after restore_fuel")
 

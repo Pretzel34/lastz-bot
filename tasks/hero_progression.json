@@ -61,6 +61,7 @@
     {
       "action": "if_template_tap",
       "template": "btn_upgrade_click.png",
+      "fallback_template": "btn_upgrade_click_alt.png",
       "required": false
     },
     {

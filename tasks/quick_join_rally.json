@@ -34,10 +34,13 @@
       "seconds": 4.0
     },
     {
-      "action": "tap_template_or_template",
+      "action": "if_template_tap",
       "template": "btn_boomer_tab.png",
-      "fallback_template": "btn_boomer_tab_alt.png",
-      "timeout": 5,
+      "fallback_templates": [
+        "btn_boomer_tab_alt.png",
+        "btn_dino_boomer.png",
+        "btn_dino_boomer_alt.png"
+      ],
       "required": false,
       "skip_to_on_found": 16,
       "note": "Checking after scroll..."

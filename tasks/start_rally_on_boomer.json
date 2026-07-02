@@ -50,7 +50,10 @@
     {
       "action": "if_template_tap",
       "template": "btn_boomer.png",
-      "fallback_template": "btn_frostbane_boomer.png",
+      "fallback_templates": [
+        "btn_frostbane_boomer.png",
+        "btn_stegosaurus_boomer.png"
+      ],
       "skip_task_if_not_found": true,
       "log_skip": "Boomer search panel not found — wrong screen, cancelling task",
       "note": "Select Boomer category. If neither template is visible the search panel didn't open — abort rather than continue on the wrong screen."
@@ -79,6 +82,7 @@
     {
       "action": "if_template_tap",
       "template": "btn_search_boomer.png",
+      "fallback_template": "btn_generic_search.png",
       "required": false,
       "note": "Search with the correct level now set"
     },
