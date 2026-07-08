@@ -2025,6 +2025,29 @@ class BotApp(ctk.CTk):
                         return False
                     engine.bot = new_bot
                     engine.executor.bot = new_bot
+
+                    # The reopened game shows its startup popup(s) again. Re-run the
+                    # same startup dismiss sequence we run at farm start BEFORE
+                    # resuming, otherwise the popup blocks the resumed task.
+                    try:
+                        _sd_file = tasks_dir / "startup_dismiss.json"
+                        if _sd_file.exists():
+                            with open(_sd_file) as _sdf:
+                                _sd_data = _json.load(_sdf)
+                            _sd_actions = (_sd_data.get("actions", _sd_data)
+                                           if isinstance(_sd_data, dict) else _sd_data)
+                            self.after(0, lambda: self._log(
+                                f"  ▶ {name}: running startup dismiss after relaunch...", "info"))
+                            for _sd_act in _sd_actions:
+                                if engine._stop_event.is_set():
+                                    break
+                                engine.executor.execute(_sd_act)
+                            self.after(0, lambda: self._log(
+                                f"  ✓ {name}: startup dismiss done", "success"))
+                    except Exception as _sd_e:
+                        self.after(0, lambda err=_sd_e: self._log(
+                            f"  ⚠ {name}: startup dismiss after relaunch failed: {err}", "warn"))
+
                     self.after(0, lambda: self._log(
                         f"  ✓ {name}: emulator reconnected — resuming tasks", "success"))
                     return True

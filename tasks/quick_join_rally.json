@@ -27,7 +27,7 @@
       "distance_pct": 75,
       "start_x_pct": 80.0,
       "start_y_pct": 92.0,
-      "note": "Attempt 1 \u00e2\u20ac\u201d scroll tab bar right (increased distance)"
+      "note": "Attempt 1 \u2014 scroll tab bar right (increased distance)"
     },
     {
       "action": "wait",
@@ -52,10 +52,10 @@
     {
       "action": "scroll_left",
       "steps": 1,
-      "distance_pct": 60,
+      "distance_pct": 20,
       "start_x_pct": 20.0,
       "start_y_pct": 92.0,
-      "note": "Recovery \u00e2\u20ac\u201d scroll left to reset"
+      "note": "Recovery \u2014 scroll left to reset"
     },
     {
       "action": "wait",
@@ -64,7 +64,11 @@
     {
       "action": "tap_template_or_template",
       "template": "btn_boomer_tab.png",
-      "fallback_template": "btn_boomer_tab_alt.png",
+      "fallback_templates": [
+        "btn_boomer_tab_alt.png",
+        "btn_dino_boomer.png",
+        "btn_dino_boomer_alt.png"
+      ],
       "timeout": 5,
       "required": false,
       "skip_to_on_found": 16,
@@ -80,7 +84,7 @@
       "distance_pct": 85,
       "start_x_pct": 80.0,
       "start_y_pct": 92.0,
-      "note": "Attempt 2 \u00e2\u20ac\u201d scroll right with larger distance"
+      "note": "Attempt 2 \u2014 scroll right with larger distance"
     },
     {
       "action": "wait",
@@ -89,10 +93,14 @@
     {
       "action": "tap_template_or_template",
       "template": "btn_boomer_tab.png",
-      "fallback_template": "btn_boomer_tab_alt.png",
+      "fallback_templates": [
+        "btn_boomer_tab_alt.png",
+        "btn_dino_boomer.png",
+        "btn_dino_boomer_alt.png"
+      ],
       "timeout": 5,
       "required": true,
-      "note": "Must find boomer tab \u00e2\u20ac\u201d error out if still not visible after scroll retries"
+      "note": "Must find boomer tab \u2014 error out if still not visible after scroll retries"
     },
     {
       "action": "wait",

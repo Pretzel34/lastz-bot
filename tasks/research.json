@@ -23,7 +23,7 @@
     {
       "action": "if_template_found",
       "template": "btn_research_in_progress_cancel.png",
-      "log_found": "Research in Progress \u00e2\u20ac\u201d stopping task",
+      "log_found": "Research in Progress — stopping task",
       "on_found": [
         {
           "action": "if_template_tap",
@@ -52,7 +52,7 @@
           "note": "Otherwise cancel the in-progress research and continue as usual"
         }
       ],
-      "log_skip": "No research in progress \u00e2\u20ac\u201d continuing to research selection"
+      "log_skip": "No research in progress — continuing to research selection"
     },
     {
       "action": "wait",

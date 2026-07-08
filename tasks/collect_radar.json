@@ -17,8 +17,8 @@
       "action": "if_template_tap",
       "template": "btn_radar_collect_present.png",
       "required": false,
-      "log_success": "Radar reward found \u00e2\u20ac\u201d collecting",
-      "log_skip": "No radar collect button present \u00e2\u20ac\u201d skipping"
+      "log_success": "Radar reward found — collecting",
+      "log_skip": "No radar collect button present — skipping"
     },
     {
       "action": "wait",
@@ -29,7 +29,7 @@
       "template": "btn_laura_radar.png",
       "fallback_template": "btn_laura_alt.png",
       "required": false,
-      "note": "Tap laura radar \u00e2\u20ac\u201d tries primary first, falls back to alternate if not found, skips if neither present"
+      "note": "Tap laura radar — tries primary first, falls back to alternate if not found, skips if neither present"
     },
     {
       "action": "wait",

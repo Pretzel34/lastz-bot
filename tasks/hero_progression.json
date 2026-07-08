@@ -50,7 +50,7 @@
           ],
           "required": false,
           "skip_task_if_not_found": true,
-          "log_skip": "No upgradeable hero found \u00e2\u20ac\u201d ending hero progression"
+          "log_skip": "No upgradeable hero found — ending hero progression"
         },
         {
           "action": "wait",

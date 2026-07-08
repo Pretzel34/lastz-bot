@@ -3422,16 +3422,22 @@ class ActionExecutor:
 
         Parameters
         ----------
-        template          : primary template filename (required)
-        fallback_template : fallback template filename (required)
-        threshold         : vision confidence override (optional)
-        required          : if False, returns SKIPPED when neither found (default True)
+        template           : primary template filename (required)
+        fallback_template  : single fallback template filename
+        fallback_templates : list of fallback template filenames, tried in order
+                             (at least one fallback required via either key)
+        threshold          : vision confidence override (optional)
+        required           : if False, returns SKIPPED when none found (default True)
         """
-        template          = action.get("template")
-        fallback_template = action.get("fallback_template")
-        if not template or not fallback_template:
+        template  = action.get("template")
+        fallbacks = []
+        if action.get("fallback_template"):
+            fallbacks.append(action["fallback_template"])
+        fallbacks.extend(action.get("fallback_templates", []))
+        if not template or not fallbacks:
             return self._fail(action,
-                "tap_template_or_template requires 'template' and 'fallback_template'")
+                "tap_template_or_template requires 'template' and "
+                "'fallback_template' or 'fallback_templates'")
 
         threshold  = float(action.get("threshold")) if action.get("threshold") is not None else None
         screenshot = self.bot.screenshot()
@@ -3451,21 +3457,22 @@ class ActionExecutor:
             result.skip_to = skip_to_idx
             return result
 
-        # ── Try fallback ─────────────────────────────────────────────────
-        fb_path  = self._template_path(fallback_template)
-        fb_match = self.vision.find_template(screenshot, fb_path, threshold=threshold)
-        fb_conf  = getattr(fb_match, "confidence", 0) if fb_match else 0
-        self._log(f"  [tap_template_or_template] fallback '{fallback_template}' conf={fb_conf:.3f} found={bool(fb_match)}")
-        if fb_match:
-            self._log(f"  [tap_template_or_template] tapping fallback at ({fb_match.x}, {fb_match.y})")
-            self._do_tap(fb_match.x, fb_match.y)
-            result = self._ok(action,
-                f"Primary '{template}' not found — tapped fallback '{fallback_template}' at ({fb_match.x}, {fb_match.y})")
-            result.skip_to = skip_to_idx
-            return result
+        # ── Try fallbacks in order ───────────────────────────────────────
+        for fb in fallbacks:
+            fb_path  = self._template_path(fb)
+            fb_match = self.vision.find_template(screenshot, fb_path, threshold=threshold)
+            fb_conf  = getattr(fb_match, "confidence", 0) if fb_match else 0
+            self._log(f"  [tap_template_or_template] fallback '{fb}' conf={fb_conf:.3f} found={bool(fb_match)}")
+            if fb_match:
+                self._log(f"  [tap_template_or_template] tapping fallback at ({fb_match.x}, {fb_match.y})")
+                self._do_tap(fb_match.x, fb_match.y)
+                result = self._ok(action,
+                    f"Primary '{template}' not found — tapped fallback '{fb}' at ({fb_match.x}, {fb_match.y})")
+                result.skip_to = skip_to_idx
+                return result
 
-        # ── Neither found ────────────────────────────────────────────────
-        skip_msg = action.get("log_skip", f"Neither '{template}' nor '{fallback_template}' found — skipping")
+        # ── None found ───────────────────────────────────────────────────
+        skip_msg = action.get("log_skip", f"Neither '{template}' nor fallbacks {fallbacks} found — skipping")
         if self.log_callback:
             self.log_callback(f"  ⏭ {skip_msg}")
         if action.get("skip_task_if_not_found", False):
@@ -3480,7 +3487,7 @@ class ActionExecutor:
                 action=action,
                 message=skip_msg,
             )
-        return self._fail(action, f"Neither '{template}' nor '{fallback_template}' found")
+        return self._fail(action, f"Neither '{template}' nor fallbacks {fallbacks} found")
 
     def _tap_first_found(self, action: dict) -> ActionResult:
         """
@@ -3924,14 +3931,39 @@ class ActionExecutor:
         self._log(f"  [adjust_boomer_level] target level = {target}")
 
         def detect_current_level(screenshot) -> int | None:
-            """Check each level template and return the best-confidence match."""
-            best_level, best_conf = None, 0.0
+            """Locate the level display via the best-matching level template, then
+            OCR that spot to read the real digit. Template matching alone confuses
+            similar digits (e.g. 6 vs 8), so the template is used only to LOCATE the
+            number; OCR reads its actual value. Falls back to the template's level
+            if OCR fails or reads out of range."""
+            best_level, best_conf, best_match = None, 0.0, None
             for lvl in range(min_level, max_level + 1):
                 tpl_name = template_pattern.replace("{value}", str(lvl))
                 path = self._template_path(tpl_name)
                 match = self.vision.find_template(screenshot, path, threshold=threshold)
                 if match and match.confidence > best_conf:
-                    best_level, best_conf = lvl, match.confidence
+                    best_level, best_conf, best_match = lvl, match.confidence, match
+            if best_match is None:
+                return None
+            # Verify the digit with OCR on the matched region (fixes 6/8-type misreads)
+            try:
+                region = getattr(best_match, "region", None)
+                if region:
+                    rx1, ry1, rx2, ry2 = region
+                    px = max(6, int((rx2 - rx1) * 0.35))
+                    py = max(6, int((ry2 - ry1) * 0.35))
+                    ocr_region = (rx1 - px, ry1 - py, rx2 + px, ry2 + py)
+                else:
+                    ocr_region = (best_match.x - 40, best_match.y - 22,
+                                  best_match.x + 40, best_match.y + 22)
+                ocr_level = self.vision.read_number(screenshot, region=ocr_region)
+            except Exception:
+                ocr_level = None
+            if ocr_level is not None and min_level <= ocr_level <= max_level:
+                if ocr_level != best_level:
+                    self._log(f"  [adjust_boomer_level] template read {best_level} "
+                              f"but OCR read {ocr_level} — trusting OCR")
+                return ocr_level
             return best_level
 
         def tap_tpl(tpl_name: str) -> bool:

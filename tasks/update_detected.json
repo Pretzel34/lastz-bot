@@ -5,8 +5,8 @@
       "action": "if_template_found",
       "template": "btn_update_detected.png",
       "skip_task_if_not_found": true,
-      "log_found": "Update dialog detected \u00e2\u20ac\u201d running update sequence",
-      "log_skip": "No update dialog \u00e2\u20ac\u201d continuing normally"
+      "log_found": "Update dialog detected — running update sequence",
+      "log_skip": "No update dialog — continuing normally"
     },
     {
       "action": "wait",
