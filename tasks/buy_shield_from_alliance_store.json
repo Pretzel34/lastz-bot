@@ -45,18 +45,10 @@
     {
       "action": "if_template_tap",
       "template": "btn_buy_alliance_store.png",
-      "set_flag": "shield_purchased",
-      "log_success": "Shield purchased from alliance store",
-      "log_skip": "Not purchased — buy button not found",
+      "log_success": "Buy button tapped — waiting for purchase confirmation",
+      "log_skip": "Buy button not found — nothing to purchase",
       "required": false,
-      "note": "Step 7: buy if possible; the flag records the outcome for the steps below"
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_exit_purchase.png",
-      "if_not_flag": "shield_purchased",
-      "required": false,
-      "note": "Step 7 fallback: not purchased — close the purchase dialog instead"
+      "note": "Step 7: attempt the buy. Success is confirmed by the congratulations popup below, not by this tap — a tapped buy can still fail (e.g. not enough alliance points)"
     },
     {
       "action": "wait",
@@ -65,20 +57,34 @@
     {
       "action": "if_template_tap",
       "template": "btn_fp_congradulations.png",
-      "if_flag": "shield_purchased",
+      "set_flag": "shield_purchased",
+      "log_success": "Shield purchased from alliance store",
+      "log_skip": "Not purchased — no purchase confirmation appeared",
       "required": false,
-      "note": "Step 9 (purchased): dismiss the congratulations popup"
-    },
-    {
-      "action": "wait",
-      "seconds": 4.0,
-      "if_flag": "shield_purchased"
+      "note": "Step 9: the congratulations popup is the real proof of purchase; tapping it dismisses it and records the outcome"
     },
     {
       "action": "if_template_tap",
-      "template": "btn_leave_store.png",
+      "template": "btn_exit_purchase.png",
+      "if_not_flag": "shield_purchased",
       "required": false,
-      "note": "Leave the store — both purchase outcomes end here"
+      "note": "Not purchased (buy button missing, or tapped but failed) — close the purchase dialog"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_leave_store.png",
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png"
+      ],
+      "required": false,
+      "log_skip": "No leave/back button found — could not exit the alliance store",
+      "note": "Leave the store — both purchase outcomes end here; fallbacks ensure we exit the view so the next task starts clean"
     },
     {
       "action": "wait",
