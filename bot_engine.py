@@ -58,7 +58,7 @@ def load_config(path: str = "config.json") -> dict:
     """Load config from file, filling in defaults for missing keys."""
     config = json.loads(json.dumps(DEFAULT_CONFIG))  # deep copy defaults
     if Path(path).exists():
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             user_config = json.load(f)
         _deep_merge(config, user_config)
     else:
@@ -269,7 +269,7 @@ class BotEngine:
         if not p.exists():
             self._log(f"Task file not found: {path}")
             return False
-        with open(p) as f:
+        with open(p, encoding="utf-8") as f:
             data = json.load(f)
         # Support both a bare list and {"name": ..., "actions": [...]}
         if isinstance(data, list):
@@ -441,6 +441,8 @@ class BotEngine:
         max_loop    = int(task.get("max_loop_iterations", 50))
 
         self._log(f"▶▶ Task: {name} ({len(actions)} actions)")
+        if self.executor:
+            self.executor.reset_flags()
         self._dismiss_ads()
 
         loop_iteration = 0

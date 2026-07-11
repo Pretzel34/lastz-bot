@@ -45,7 +45,9 @@ LASTZ_ACT  = "com.im30.aps.debug.UnityPlayerActivityCustom"
 
 try:
     from bot_engine import BotEngine, EngineState, load_config, save_config
-    from action_executor import ActionStatus
+    from action_executor import (ActionStatus, estimate_server_datetime,
+                                 resolve_server_day, PRE_BUSTER_WINDOW_START,
+                                 PRE_BUSTER_GRACE_END)
     from launcher import EmulatorLauncher, MEmuLauncher, index_to_port, get_profile, find_emulator_install, emulator_path_example
     BOT_AVAILABLE = True
 except ImportError as e:
@@ -234,6 +236,20 @@ TASK_CATEGORIES = [
             {"key": "help_allies_bounties",  "label": "Help Allies Bounties", "type": "toggle", "default": True},
         ]
     },
+    {
+        "key":   "shield",
+        "label": "Shield",
+        "icon":  "🛡️",
+        "settings": [
+            {"key": "enabled",            "label": "Enable Shielding",                "type": "toggle", "default": False},
+            {"key": "only_on_buster_day", "label": "Only Shield On Enemy Buster Day", "type": "toggle", "default": False},
+            {"key": "shield_type",        "label": "Shield Type",                     "type": "select", "default": "8hr shield",
+             "options": ["8hr shield", "24hr shield"]},
+            {"key": "buy_from_alliance_store", "label": "Buy Shield from Alliance Store", "type": "toggle", "default": False},
+            {"key": "buy_using_diamonds",      "label": "Buy Shield using Diamonds",      "type": "toggle", "default": False},
+            {"key": "pre_buster_shield",       "label": "Apply Shield Before Enemy Buster", "type": "toggle", "default": False},
+        ]
+    },
 ]
 
 DEFAULT_FARM = {
@@ -297,6 +313,11 @@ class BotApp(ctk.CTk):
         self._timer_after_id = None
         self._cycle_complete_time = None   # set when all tasks finish
 
+        # Pre-buster shield window state
+        self._pre_buster_done_key = self._load_pre_buster_state()  # upcoming day-6 date already handled
+        self._pre_buster_paused_elapsed = None  # countdown progress frozen while shield-only run is active
+        self._pre_buster_last_check = 0.0       # throttle for the window check in _tick_timer
+
         # Farm-settings category drag-and-drop
         self._cat_drag_key = None
         self._cat_drag_hover_key = None
@@ -343,7 +364,7 @@ class BotApp(ctk.CTk):
         self._is_first_run = not p.exists()
         if p.exists():
             try:
-                with open(p) as f:
+                with open(p, encoding="utf-8") as f:
                     data = json.load(f)
                 self.farms = data.get("farms", [])
                 self.bot_settings = {**self._default_bot_settings(),
@@ -1386,7 +1407,7 @@ class BotApp(ctk.CTk):
 
     # Session Overview table columns (kept in one place so header + rows align).
     _STATS_COLUMNS = ["Farm", "Emu ID", "Status", "Runtime", "Actions",
-                      "Success %", "Tasks", "Server Time", "Local Time"]
+                      "Success %", "Tasks", "Shielded", "Server Time", "Local Time"]
     _STATS_COL_W = 120
 
     def _build_page_farm_stats(self):
@@ -1424,7 +1445,7 @@ class BotApp(ctk.CTk):
         import json as _json
         from pathlib import Path as _Path
         try:
-            data = _json.loads(_Path(f"logs/{filename}").read_text())
+            data = _json.loads(_Path(f"logs/{filename}").read_text(encoding="utf-8"))
             date = data.get("date", "")
             t = data.get("time", "")
             parts = date.split("-")
@@ -1433,13 +1454,31 @@ class BotApp(ctk.CTk):
         except Exception:
             return "—"
 
+    def _shielded_status(self, farm, shield_state):
+        """'✓' if the farm's recorded shield is still active, else '✗'."""
+        from datetime import datetime as _dt
+        entry = shield_state.get(str(farm.get("port", "")))
+        try:
+            if entry and _dt.now() < _dt.fromisoformat(entry["expires_at"]):
+                return "✓"
+        except Exception:
+            pass
+        return "✗"
+
     def _refresh_stats_table(self):
+        import json as _json
+        from pathlib import Path as _Path
         for w in self.stats_rows_frame.winfo_children():
             w.destroy()
         # Server time is global to the game server; local time is per-device.
         # Until per-farm capture is wired up, show the latest recorded values.
         server_t = self._read_time_brief("server_time.json")
         local_t  = self._read_time_brief("local_time.json")
+        shield_state = {}
+        try:
+            shield_state = _json.loads(_Path("logs/shield_state.json").read_text(encoding="utf-8"))
+        except Exception:
+            pass
         for farm in self.farms:
             engine = self.engines.get(farm["emu_index"])
             row = ctk.CTkFrame(self.stats_rows_frame, fg_color=C["card"],
@@ -1453,6 +1492,7 @@ class BotApp(ctk.CTk):
                 f"{engine.stats.actions_succeeded}/{engine.stats.actions_run}" if engine else "—",
                 f"{engine.stats.success_rate:.0f}%" if engine else "—",
                 str(engine.stats.tasks_completed) if engine else "—",
+                self._shielded_status(farm, shield_state),
                 server_t,
                 local_t,
             ]
@@ -1507,7 +1547,7 @@ class BotApp(ctk.CTk):
         path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
         if path:
             try:
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
                 self.farms = data.get("farms", self.farms)
                 self.bot_settings = {**self._default_bot_settings(),
@@ -1543,7 +1583,7 @@ class BotApp(ctk.CTk):
         try:
             import json, sys as _sys
             _base = _sys._MEIPASS if getattr(_sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-            with open(os.path.join(_base, "config.json")) as _f:
+            with open(os.path.join(_base, "config.json"), encoding="utf-8") as _f:
                 _cfg = json.load(_f)
             adb_path = _cfg.get("emulator", {}).get("adb_path", "adb")
         except Exception:
@@ -1735,8 +1775,15 @@ class BotApp(ctk.CTk):
         self.after(0, lambda count=n, et=emu_type: self._log(
             f"  📐 Arranged {count} {et} window(s) left-to-right, bot GUI to the right", "info"))
 
-    def _start_farm(self, farm: dict, _semaphore=None):
-        """Launch emulator, open Last Z, then start tasks — all in one click."""
+    def _start_farm(self, farm: dict, _semaphore=None, shield_only=False):
+        """
+        Launch emulator, open Last Z, then start tasks — all in one click.
+
+        shield_only=True is the pre-buster window pass: pre-steps are limited
+        to the update check + startup dismiss, only the Shield task runs,
+        maintenance is skipped, and completion resumes the paused cycle
+        countdown instead of resetting it.
+        """
         if not BOT_AVAILABLE:
             messagebox.showerror("Error", f"Bot modules missing:\n{IMPORT_ERROR}")
             return
@@ -1861,7 +1908,7 @@ class BotApp(ctk.CTk):
                 _upd_file = tasks_dir / "update_detected.json"
                 if _upd_file.exists():
                     try:
-                        with open(_upd_file) as _uf:
+                        with open(_upd_file, encoding="utf-8") as _uf:
                             _upd_data = _json.load(_uf)
                         _upd_acts = (_upd_data.get("actions", [])
                                      if isinstance(_upd_data, dict) else _upd_data)
@@ -1898,7 +1945,7 @@ class BotApp(ctk.CTk):
                 startup_file = tasks_dir / "startup_dismiss.json"
                 if startup_file.exists():
                     try:
-                        with open(startup_file) as sf:
+                        with open(startup_file, encoding="utf-8") as sf:
                             startup_data = _json.load(sf)
                         startup_actions = startup_data.get("actions", startup_data) if isinstance(startup_data, dict) else startup_data
                         self.after(0, lambda: self._log("  ▶ Running startup dismiss...", "info"))
@@ -1916,9 +1963,12 @@ class BotApp(ctk.CTk):
 
                 # Step 3b — run identify_resources to determine gather priority
                 identify_file = tasks_dir / "identify_resources.json"
-                if identify_file.exists():
+                if shield_only:
+                    self.after(0, lambda: self._log(
+                        "  ⏭ Shield-only pass — skipping identify_resources", "info"))
+                elif identify_file.exists():
                     try:
-                        with open(identify_file) as rf:
+                        with open(identify_file, encoding="utf-8") as rf:
                             identify_data = _json.load(rf)
                         identify_actions = identify_data.get("actions", identify_data) if isinstance(identify_data, dict) else identify_data
                         self.after(0, lambda: self._log("  ▶ Identifying resource priorities...", "info"))
@@ -1946,13 +1996,17 @@ class BotApp(ctk.CTk):
                 else:
                     self.after(0, lambda: self._log("  ℹ No identify_resources.json found — skipping", "info"))
 
-                _prefarm_gap()
+                if not shield_only:
+                    _prefarm_gap()
 
                 # Step 3c — read server time so daily-task skipping works
                 server_time_file = tasks_dir / "check_server_time.json"
-                if server_time_file.exists():
+                if shield_only:
+                    self.after(0, lambda: self._log(
+                        "  ⏭ Shield-only pass — skipping check_server_time", "info"))
+                elif server_time_file.exists():
                     try:
-                        with open(server_time_file) as _stf:
+                        with open(server_time_file, encoding="utf-8") as _stf:
                             _st_data = _json.load(_stf)
                         _st_actions = (_st_data.get("actions", [])
                                        if isinstance(_st_data, dict) else _st_data)
@@ -1968,13 +2022,17 @@ class BotApp(ctk.CTk):
                 else:
                     self.after(0, lambda: self._log("  ℹ No check_server_time.json found — skipping", "info"))
 
-                _prefarm_gap()
+                if not shield_only:
+                    _prefarm_gap()
 
                 # Step 3d — capture the current Full Preparedness event (green-highlighted row)
                 fp_sched_file = tasks_dir / "check_event_calander.json"
-                if fp_sched_file.exists():
+                if shield_only:
+                    self.after(0, lambda: self._log(
+                        "  ⏭ Shield-only pass — skipping check_event_calander", "info"))
+                elif fp_sched_file.exists():
                     try:
-                        with open(fp_sched_file) as _fpf:
+                        with open(fp_sched_file, encoding="utf-8") as _fpf:
                             _fp_data = _json.load(_fpf)
                         _fp_actions = (_fp_data.get("actions", [])
                                        if isinstance(_fp_data, dict) else _fp_data)
@@ -1990,10 +2048,12 @@ class BotApp(ctk.CTk):
                 else:
                     self.after(0, lambda: self._log("  ℹ No check_event_calander.json found — skipping", "info"))
 
-                _prefarm_gap()
+                if not shield_only:
+                    _prefarm_gap()
 
                 # Step 4 — load tasks from JSON files and start
-                tasks = self._farm_to_tasks(farm)
+                tasks = self._farm_to_tasks(
+                    farm, only_categories={"shield"} if shield_only else None)
                 if not tasks:
                     self.after(0, lambda: self._log(
                         f"⚠ {name}: no tasks found in tasks/ — check your JSON files", "warn"))
@@ -2032,7 +2092,7 @@ class BotApp(ctk.CTk):
                     try:
                         _sd_file = tasks_dir / "startup_dismiss.json"
                         if _sd_file.exists():
-                            with open(_sd_file) as _sdf:
+                            with open(_sd_file, encoding="utf-8") as _sdf:
                                 _sd_data = _json.load(_sdf)
                             _sd_actions = (_sd_data.get("actions", _sd_data)
                                            if isinstance(_sd_data, dict) else _sd_data)
@@ -2080,12 +2140,17 @@ class BotApp(ctk.CTk):
                             self.after(0, lambda: self._log(
                                 f"  ✗ {name}: engine thread still alive after kill — abandoning", "error"))
 
-                # Record cycle completion time (used for "Next Cycle" countdown)
-                self.after(0, self._on_farm_cycle_complete)
+                # Record cycle completion time (used for "Next Cycle" countdown).
+                # Shield-only passes must not reset the countdown — the paused
+                # countdown resumes via _on_shield_only_complete in the finally.
+                if not shield_only:
+                    self.after(0, self._on_farm_cycle_complete)
 
                 # Maintenance: ADB cleanup while emulator is still running
+                # (skipped for shield-only passes so they don't consume
+                # cleanup-counter runs)
                 _maint_cfg = self.bot_settings.get("maintenance", {})
-                _maint_enabled = _maint_cfg.get("enabled", True)
+                _maint_enabled = _maint_cfg.get("enabled", True) and not shield_only
                 _every_n = int(_maint_cfg.get("cleanup_every_n_runs", 50))
                 _needs_clean = False
                 if _maint_enabled and _every_n > 0:
@@ -2135,6 +2200,10 @@ class BotApp(ctk.CTk):
             finally:
                 if _semaphore:
                     _semaphore.release()
+                if shield_only:
+                    # Guaranteed per-farm accounting so the paused cycle
+                    # countdown always resumes, even on early-return paths.
+                    self.after(0, self._on_shield_only_complete)
 
         farm_thread = threading.Thread(target=do, daemon=True)
         farm_thread.start()
@@ -2199,6 +2268,146 @@ class BotApp(ctk.CTk):
         self._cycle_complete_time = datetime.now()
         self._update_status_display()
 
+    # ── Pre-buster shield window ──────────────────────────────────────────
+    # Ten minutes before the server day rolls into Enemy Buster day (day 6),
+    # an idle bot pauses the Next Cycle countdown, runs a shield-only pass
+    # for every farm with 'Apply Shield Before Enemy Buster' on, then
+    # resumes the countdown from where it was paused.
+
+    @property
+    def _pre_buster_state_file(self) -> Path:
+        return Path("logs/pre_buster_state.json")
+
+    def _load_pre_buster_state(self):
+        import json as _json
+        try:
+            return _json.loads(self._pre_buster_state_file.read_text(encoding="utf-8")).get("done_key")
+        except Exception:
+            return None
+
+    def _save_pre_buster_state(self, key):
+        import json as _json
+        try:
+            self._pre_buster_state_file.parent.mkdir(exist_ok=True)
+            self._pre_buster_state_file.write_text(_json.dumps({"done_key": key}, indent=2))
+        except Exception:
+            pass
+
+    def _pre_buster_window(self):
+        """
+        Return the dedup key (the buster day's server date, "YYYY-M-D") when
+        the pre-buster window is open, else None.
+
+        Window: server day 5 at/after PRE_BUSTER_WINDOW_START, plus a grace
+        tail on day 6 before PRE_BUSTER_GRACE_END (a bot busy at 23:50 that
+        only goes idle just after midnight still gets its pass). Fires only
+        on server-derived data — never on local-clock guesses.
+        """
+        from datetime import timedelta as _td
+        if not BOT_AVAILABLE:
+            return None
+        est = estimate_server_datetime()
+        if est is None:
+            return None
+        resolved = resolve_server_day(f"{est.year}-{est.month}-{est.day}")
+        if not resolved:
+            return None
+        day, _src = resolved
+        tod = (est.hour, est.minute)
+        if day == 5 and tod >= PRE_BUSTER_WINDOW_START:
+            nxt = est + _td(days=1)
+            return f"{nxt.year}-{nxt.month}-{nxt.day}"
+        if day == 6 and tod < PRE_BUSTER_GRACE_END:
+            return f"{est.year}-{est.month}-{est.day}"
+        return None
+
+    def _maybe_start_pre_buster_run(self):
+        """Fire the shield-only pass if the pre-buster window is open. Tk main thread only."""
+        import json as _json
+        from datetime import datetime as _dt, timedelta as _td
+
+        if not BOT_AVAILABLE or self._cycle_complete_time is None:
+            return
+        key = self._pre_buster_window()
+        if not key or key == self._pre_buster_done_key:
+            return
+        if any(getattr(e, "_thread", None) and e._thread.is_alive()
+               for e in self.engines.values()):
+            return
+
+        toggled = [
+            f for f in self.farms
+            if f.get("enabled", True)
+            and f.get("tasks", {}).get("shield", {}).get("enabled", False)
+            and f.get("tasks", {}).get("shield", {}).get("pre_buster_shield", False)
+        ]
+        if not toggled:
+            return
+
+        # Local wall-clock moment of the upcoming server midnight, to skip
+        # farms whose recorded shield already covers past the rollover.
+        rollover_local = None
+        est = estimate_server_datetime()
+        if est is not None:
+            secs_left = (24 - est.hour) * 3600 - est.minute * 60 - est.second
+            rollover_local = _dt.now() + _td(seconds=secs_left)
+        shield_state = {}
+        try:
+            shield_state = _json.loads(Path("logs/shield_state.json").read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+        farms = []
+        for farm in toggled:
+            entry = shield_state.get(str(farm.get("port", "")))
+            try:
+                if (entry and rollover_local is not None
+                        and _dt.fromisoformat(entry["expires_at"]) > rollover_local):
+                    self._log(f"  🛡 {farm['name']}: shield already covers past the rollover — skipping", "info")
+                    continue
+            except Exception:
+                pass
+            farms.append(farm)
+
+        # Pause the countdown and disarm auto-restart BEFORE launching, so a
+        # min-cycle expiry can't fire a full cycle mid-shield-run.
+        self._pre_buster_paused_elapsed = datetime.now() - self._cycle_complete_time
+        self._cycle_complete_time = None
+        self._pre_buster_done_key = key
+        self._save_pre_buster_state(key)
+
+        if not farms:
+            self._log("🛡 Pre-buster window open — every eligible farm is already shielded past the rollover", "info")
+            self._resume_cycle_countdown()
+            return
+
+        self._log(f"🛡 Pre-buster window open — pausing cycle countdown and running "
+                  f"a shield-only pass for {len(farms)} farm(s)...", "accent")
+        self._pre_buster_pending = len(farms)
+        self._start_shield_only_run(farms)
+
+    def _start_shield_only_run(self, farms):
+        """Launch the shield-only pass for the given farms (semaphore-serialized)."""
+        if self._farm_semaphore is None:
+            self._farm_semaphore = threading.Semaphore(
+                int(self.bot_settings.get("max_concurrent_sessions", 1)))
+        for farm in farms:
+            self._start_farm(farm, _semaphore=self._farm_semaphore, shield_only=True)
+
+    def _on_shield_only_complete(self):
+        """Per-farm completion of the shield-only pass; resumes the countdown after the last one."""
+        self._pre_buster_pending = max(0, getattr(self, "_pre_buster_pending", 1) - 1)
+        if self._pre_buster_pending == 0:
+            self._resume_cycle_countdown()
+
+    def _resume_cycle_countdown(self):
+        """Restore the Next Cycle countdown that was paused for the pre-buster pass."""
+        if self._pre_buster_paused_elapsed is not None:
+            self._cycle_complete_time = datetime.now() - self._pre_buster_paused_elapsed
+            self._pre_buster_paused_elapsed = None
+            self._log("🛡 Pre-buster pass finished — cycle countdown resumed", "info")
+        self._update_status_display()
+
     def _toggle_record_runs(self):
         # Button is hidden — method kept for future re-enabling
         self._record_runs = not self._record_runs
@@ -2248,10 +2457,13 @@ class BotApp(ctk.CTk):
             self._stop_farm(farm)
         self._stop_timer()
 
-    def _farm_to_tasks(self, farm: dict) -> list:
+    def _farm_to_tasks(self, farm: dict, only_categories=None) -> list:
         """
         Build the ordered task list for a farm, respecting the per-farm
         category order set via drag-and-drop in the farm settings UI.
+
+        only_categories: optional set of category keys — when given, only
+        those builders run (used by the pre-buster shield-only pass).
         """
         import json as _json
         from pathlib import Path
@@ -2272,7 +2484,7 @@ class BotApp(ctk.CTk):
                 json_file = tasks_dir / f"{key}.json"
                 if json_file.exists():
                     try:
-                        with open(json_file) as f:
+                        with open(json_file, encoding="utf-8") as f:
                             data = _json.load(f)
                         actions = data.get("actions", data) if isinstance(data, dict) else data
                         tasks.append({"name": label, "actions": actions})
@@ -2294,7 +2506,7 @@ class BotApp(ctk.CTk):
                 json_file = tasks_dir / f"{json_key}.json"
                 if json_file.exists():
                     try:
-                        with open(json_file) as f:
+                        with open(json_file, encoding="utf-8") as f:
                             data = _json.load(f)
                         actions = data.get("actions", data) if isinstance(data, dict) else data
                         repeat = int(rally_cfg.get("max_rallies_per_day", 1)) if key == "create_rally" else 1
@@ -2322,7 +2534,7 @@ class BotApp(ctk.CTk):
             priority_file = Path("logs/resource_priority.json")
             if priority_file.exists():
                 try:
-                    with open(priority_file) as pf:
+                    with open(priority_file, encoding="utf-8") as pf:
                         priority_order = _json.load(pf).get("priority", [])
                 except Exception:
                     pass
@@ -2342,7 +2554,7 @@ class BotApp(ctk.CTk):
                 json_file = tasks_dir / f"{json_key}.json"
                 if json_file.exists():
                     try:
-                        with open(json_file) as f:
+                        with open(json_file, encoding="utf-8") as f:
                             data = _json.load(f)
                         actions = data.get("actions", data) if isinstance(data, dict) else data
                         gather_pool.append((key, label, actions))
@@ -2374,7 +2586,7 @@ class BotApp(ctk.CTk):
                 json_file = tasks_dir / f"{json_key}.json"
                 if json_file.exists():
                     try:
-                        with open(json_file) as f:
+                        with open(json_file, encoding="utf-8") as f:
                             data = _json.load(f)
                         actions = data.get("actions", data) if isinstance(data, dict) else data
                         tasks.append({"name": label, "actions": actions})
@@ -2396,7 +2608,7 @@ class BotApp(ctk.CTk):
                 json_file = tasks_dir / f"{json_key}.json"
                 if json_file.exists():
                     try:
-                        with open(json_file) as f:
+                        with open(json_file, encoding="utf-8") as f:
                             data = _json.load(f)
                         actions = data.get("actions", data) if isinstance(data, dict) else data
                         tasks.append({"name": label, "actions": actions})
@@ -2414,7 +2626,7 @@ class BotApp(ctk.CTk):
             json_file = tasks_dir / "deploy_trucks.json"
             if json_file.exists():
                 try:
-                    with open(json_file) as f:
+                    with open(json_file, encoding="utf-8") as f:
                         data = _json.load(f)
                     actions = data.get("actions", data) if isinstance(data, dict) else data
                     tasks.append({"name": "Deploy Trucks", "actions": actions,
@@ -2429,7 +2641,7 @@ class BotApp(ctk.CTk):
                 atk_file = tasks_dir / "truck_attack.json"
                 if atk_file.exists():
                     try:
-                        with open(atk_file) as f:
+                        with open(atk_file, encoding="utf-8") as f:
                             data = _json.load(f)
                         actions = data.get("actions", data) if isinstance(data, dict) else data
                         _atk_task = {"name": "Truck Attack", "actions": actions,
@@ -2455,7 +2667,7 @@ class BotApp(ctk.CTk):
                 self._log("  ⚠ enter_bounties.json not found, skipping bounties", "warn")
                 return
             try:
-                with open(enter_file) as f:
+                with open(enter_file, encoding="utf-8") as f:
                     enter_data = _json.load(f)
                 base_actions = [a for a in enter_data.get("actions", [])
                                 if a.get("action") != "loop_task"]
@@ -2495,7 +2707,7 @@ class BotApp(ctk.CTk):
             json_file = tasks_dir / "research.json"
             if json_file.exists():
                 try:
-                    with open(json_file) as f:
+                    with open(json_file, encoding="utf-8") as f:
                         data = _json.load(f)
                     actions = data.get("actions", data) if isinstance(data, dict) else data
                     selected = research_cfg.get("research_in", "?")
@@ -2506,6 +2718,28 @@ class BotApp(ctk.CTk):
             else:
                 self._log("  ⚠ research.json not found, skipping", "warn")
 
+        def _add_shield():
+            shield_cfg = farm_tasks.get("shield", {})
+            if not shield_cfg.get("enabled", False):
+                self._log("  Shield disabled — skipping", "warn")
+                return
+            json_file = tasks_dir / "shield.json"
+            if not json_file.exists():
+                self._log("  ⚠ shield.json not found, skipping", "warn")
+                return
+            try:
+                with open(json_file, encoding="utf-8") as f:
+                    data = _json.load(f)
+                actions = data.get("actions", data) if isinstance(data, dict) else data
+                if not actions:
+                    self._log("  ⚠ shield.json has no actions yet — skipping", "warn")
+                    return
+                shield_type = shield_cfg.get("shield_type", "8hr shield")
+                tasks.append({"name": f"Shield ({shield_type})", "actions": actions})
+                self._log(f"  ✓ Shield → {shield_type} — {len(actions)} actions", "info")
+            except Exception as e:
+                self._log(f"  ✗ Failed to load shield.json: {e}", "error")
+
         _builders = {
             "daily_tasks":     _add_daily,
             "rally":           _add_rally,
@@ -2515,6 +2749,7 @@ class BotApp(ctk.CTk):
             "trucks":          _add_trucks,
             "bounties":        _add_bounties,
             "research":        _add_research,
+            "shield":          _add_shield,
         }
 
         default_order = [c["key"] for c in TASK_CATEGORIES]
@@ -2522,6 +2757,8 @@ class BotApp(ctk.CTk):
         # Append any categories missing from a saved order (e.g. trucks/research
         # added after the order was persisted) so new task types always run.
         order += [k for k in default_order if k not in order]
+        if only_categories is not None:
+            order = [k for k in order if k in only_categories]
         for cat_key in order:
             if cat_key in _builders:
                 _builders[cat_key]()
@@ -2621,6 +2858,17 @@ class BotApp(ctk.CTk):
                     self._log("⟳ Cycle time elapsed — starting next cycle...", "accent")
                     self._cycle_complete_time = None
                     self._start_all()
+
+        # Pre-buster shield window check (throttled to ~30s), only while
+        # idle between cycles.
+        import time as _time
+        if (self._cycle_complete_time
+                and _time.time() - self._pre_buster_last_check >= 30):
+            self._pre_buster_last_check = _time.time()
+            try:
+                self._maybe_start_pre_buster_run()
+            except Exception as _pb_e:
+                self._log(f"⚠ Pre-buster check error: {_pb_e}", "warn")
 
         self._timer_after_id = self.after(1000, self._tick_timer)
 

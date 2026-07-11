@@ -1,0 +1,88 @@
+{
+  "name": "Buy Shield from Alliance Store",
+  "actions": [
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_alliance_icon_alt_1.png",
+        "btn_alliance_tab_alt.png",
+        "btn_alliance_icon_alt.png",
+        "btn_alliance_icon.png"
+      ],
+      "abort_task_if_not_found": true,
+      "log_skip": "Alliance tab not found — backing out of alliance store purchase",
+      "note": "Step 1: open the alliance tab, trying every known icon variant"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_alliance_shop.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_from_setting",
+      "setting": "shield.shield_type",
+      "map": {
+        "8hr shield": "btn_shop_8_hr_shield.png",
+        "24hr shield": "btn_shop_24_hr_shield.png"
+      },
+      "max_scrolls": 1,
+      "wait_seconds": 4.0,
+      "required": false,
+      "note": "Step 5: tap the shop listing for the shield type selected in farm settings"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_buy_alliance_store.png",
+      "set_flag": "shield_purchased",
+      "log_success": "Shield purchased from alliance store",
+      "log_skip": "Not purchased — buy button not found",
+      "required": false,
+      "note": "Step 7: buy if possible; the flag records the outcome for the steps below"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_exit_purchase.png",
+      "if_not_flag": "shield_purchased",
+      "required": false,
+      "note": "Step 7 fallback: not purchased — close the purchase dialog instead"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_fp_congradulations.png",
+      "if_flag": "shield_purchased",
+      "required": false,
+      "note": "Step 9 (purchased): dismiss the congratulations popup"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "shield_purchased"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_leave_store.png",
+      "required": false,
+      "note": "Leave the store — both purchase outcomes end here"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    }
+  ]
+}

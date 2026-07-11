@@ -1,0 +1,46 @@
+{
+  "name": "shield",
+  "actions": [
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "skip_if_shield_active",
+      "note": "A previously applied shield is still running — no need to shield (or buy) again"
+    },
+    {
+      "action": "skip_unless_enemy_buster_day",
+      "setting": "shield.only_on_buster_day",
+      "buster_day": 6,
+      "note": "If 'Only Shield On Enemy Buster Day' is enabled, abort unless the tracked server day is 6"
+    },
+    {
+      "action": "run_task",
+      "task": "use_shield_from_warehouse.json",
+      "note": "Try to apply a shield already in the warehouse; sets the 'shield_found' flag"
+    },
+    {
+      "action": "run_task",
+      "task": "buy_shield_from_alliance_store.json",
+      "setting": "shield.buy_from_alliance_store",
+      "if_not_flag": "shield_found",
+      "contain_abort": true,
+      "note": "No shield in the warehouse — buy one from the alliance store if enabled"
+    },
+    {
+      "action": "run_task",
+      "task": "buy_shield_using_diamonds.json",
+      "setting": "shield.buy_using_diamonds",
+      "if_not_flag": ["shield_found", "shield_purchased"],
+      "contain_abort": true,
+      "note": "Still no shield and the alliance store didn't buy one — buy with diamonds if enabled"
+    },
+    {
+      "action": "run_task",
+      "task": "use_shield_from_warehouse.json",
+      "if_flag": "shield_purchased",
+      "note": "A shield was purchased — go back to the warehouse and apply it"
+    }
+  ]
+}

@@ -10,7 +10,7 @@
       "template": "btn_bounty_entry_icon.png",
       "fallback_template": "btn_bounty_entry_icon_alt.png",
       "skip_task_if_not_found": true,
-      "log_skip": "bounty tab not found"
+      "log_skip": "bounty entry icon not found — bounties already completed, skipping task"
     },
     {
       "action": "wait",

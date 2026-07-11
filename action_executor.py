@@ -47,6 +47,93 @@ class ActionResult:
 
 
 # ---------------------------------------------------------------------------
+# Server clock / event-cycle helpers
+# ---------------------------------------------------------------------------
+# Shared by the in-game buster-day gate and the GUI's pre-buster trigger so
+# the two can never disagree on when the window opens.
+
+PRE_BUSTER_WINDOW_START = (23, 50)   # server time-of-day the pre-buster window opens
+PRE_BUSTER_GRACE_END    = (0, 10)    # window tail after midnight on buster day
+
+
+def estimate_server_datetime():
+    """
+    Best-estimate current server datetime: the server date+time recorded in
+    logs/server_time.json plus the local wall-clock time elapsed since
+    recorded_at. Returns a datetime, or None if no usable capture exists.
+    """
+    import json as _json
+    from datetime import datetime as _dt, timedelta as _td
+    from pathlib import Path as _Path
+
+    try:
+        p = _Path("logs/server_time.json")
+        if not p.exists():
+            return None
+        data = _json.loads(p.read_text(encoding="utf-8"))
+        date_str = data.get("date") or data.get("server_date")
+        time_str = data.get("time") or data.get("server_time") or "0:0"
+        if not date_str:
+            return None
+        y, mo, d = (int(x) for x in date_str.split("-"))
+        tp = [int(x) for x in time_str.split(":")]
+        while len(tp) < 3:
+            tp.append(0)
+        recorded = _dt(y, mo, d, tp[0], tp[1], tp[2])
+        try:
+            elapsed = _dt.now() - _dt.fromisoformat(data.get("recorded_at", ""))
+        except Exception:
+            elapsed = _td(0)
+        return recorded + elapsed
+    except Exception:
+        return None
+
+
+def resolve_server_day(server_date_str):
+    """
+    Resolve the game's Day 1-7 cycle number for a server date string
+    (non-padded "YYYY-M-D"). Returns (day, source) or None.
+
+    Sources, in priority order:
+      1. "event calendar capture" — the "Day N" header captured by
+         read_current_fp_event (logs/fp_current_event.json), projected
+         forward across server midnights since capture.
+      2. "server date weekday" — ISO weekday of the server date (assumes
+         the cycle starts on Monday).
+
+    Deliberately no local-date fallback — callers that want one (the
+    in-game gate) add it themselves; automation triggers must never fire
+    on local-clock guesses.
+    """
+    import json as _json
+    from datetime import date as _date
+    from pathlib import Path as _Path
+
+    if not server_date_str:
+        return None
+    try:
+        y2, m2, d2 = (int(x) for x in str(server_date_str).split("-"))
+        server_date = _date(y2, m2, d2)
+    except (ValueError, TypeError):
+        return None
+
+    try:
+        p = _Path("logs/fp_current_event.json")
+        if p.exists():
+            data     = _json.loads(p.read_text(encoding="utf-8"))
+            cap_day  = data.get("day")
+            cap_date = data.get("day_server_date")
+            if cap_day and cap_date:
+                y1, m1, d1 = (int(x) for x in str(cap_date).split("-"))
+                elapsed = (server_date - _date(y1, m1, d1)).days
+                return ((int(cap_day) - 1 + elapsed) % 7 + 1, "event calendar capture")
+    except Exception:
+        pass
+
+    return (server_date.isoweekday(), "server date weekday")
+
+
+# ---------------------------------------------------------------------------
 # Action Executor
 # ---------------------------------------------------------------------------
 
@@ -88,6 +175,7 @@ class ActionExecutor:
         dispatch_fp_task         - derive current server time, look up fp_schedule.json, run the matching child task
         loop_until_template      - run on_each actions repeatedly until any of the specified templates appears
         run_task_if_template     - run a sub-task JSON only if an identifying template is visible; silently skips if not found
+        tap_template_from_setting - tap the template mapped from a farm-setting value, scrolling down to find it
     """
 
     def __init__(
@@ -110,6 +198,11 @@ class ActionExecutor:
         self._formations_sent = 0      # tracks how many gather formations have been dispatched this session
         self._used_slot_indices: set = set()  # slot indices already tapped this session (0-based)
         self.emulator_type = emulator_type
+        self._flags: dict = {}         # session flags set via 'set_flag', read via 'if_flag'/'if_not_flag'
+
+    def reset_flags(self):
+        """Clear session flags set via 'set_flag'. Called by BotEngine at the start of each task."""
+        self._flags = {}
 
     def set_farm_settings(self, settings: dict):
         """Update farm task settings (e.g. rally.boomer_level). Called by BotEngine before each task."""
@@ -158,6 +251,11 @@ class ActionExecutor:
         if not action_type:
             return self._fail(action, "No 'action' key in action dict")
 
+        gate_msg = self._check_flag_gates(action)
+        if gate_msg:
+            self._log(f"  ⏭ {action_type}: {gate_msg}")
+            return ActionResult(status=ActionStatus.SKIPPED, action=action, message=gate_msg)
+
         start = time.time()
         self._log(f"▶ {action_type} {self._params_str(action)}")
 
@@ -167,11 +265,41 @@ class ActionExecutor:
             result = self._fail(action, f"Exception: {e}")
 
         result.duration_ms = int((time.time() - start) * 1000)
+        flag_name = action.get("set_flag")
+        if flag_name:
+            self._flags[flag_name] = result.status == ActionStatus.SUCCESS
+            self._log(f"  ⚑ flag '{flag_name}' = {self._flags[flag_name]}")
         if result.status == ActionStatus.SUCCESS and action.get("finish_task_on_success"):
             result.status = ActionStatus.ABORT_TASK
         status_icon = "✓" if result else "✗"
         self._log(f"  {status_icon} {result.message} ({result.duration_ms}ms)")
         return result
+
+    def _check_flag_gates(self, action: dict) -> Optional[str]:
+        """
+        Evaluate the optional 'if_flag' / 'if_not_flag' gates on an action.
+
+        Any action may carry:
+          set_flag    - flag name recorded as True when the action SUCCEEDS,
+                        False on any other outcome
+          if_flag     - flag name (or list of names) that must all be True,
+                        otherwise the action is skipped
+          if_not_flag - flag name (or list of names) that must all be False/unset,
+                        otherwise the action is skipped
+
+        Flags are cleared at the start of each task and shared with sub-tasks
+        run via run_task, so a sub-task can report an outcome (e.g. a purchase)
+        back to its parent. Returns a skip message if a gate fails, else None.
+        """
+        def _names(value):
+            return [value] if isinstance(value, str) else list(value or [])
+        for name in _names(action.get("if_flag")):
+            if not self._flags.get(name):
+                return f"flag '{name}' not set — skipping"
+        for name in _names(action.get("if_not_flag")):
+            if self._flags.get(name):
+                return f"flag '{name}' is set — skipping"
+        return None
 
     # ------------------------------------------------------------------
     # Dispatcher
@@ -222,6 +350,7 @@ class ActionExecutor:
             "tap_free_formation":       self._tap_free_formation,
             "check_claimed":            self._check_claimed,
             "repeat_if_template":       self._repeat_if_template,
+            "long_press_template":      self._long_press_template,
             "verify_setting_template":  self._verify_setting_template,
             "adjust_boomer_level":      self._adjust_boomer_level,
             "adjust_boomer_level_ocr":  self._adjust_boomer_level_ocr,
@@ -244,11 +373,15 @@ class ActionExecutor:
             "skip_if_server_time_fresh": self._skip_if_server_time_fresh,
             "skip_if_done_today":       self._skip_if_done_today,
             "mark_done_today":          self._mark_done_today,
+            "skip_unless_enemy_buster_day": self._skip_unless_enemy_buster_day,
+            "record_shield_applied":    self._record_shield_applied,
+            "skip_if_shield_active":    self._skip_if_shield_active,
             "skip_if_fp_cycle_current":  self._skip_if_fp_cycle_current,
             "read_fp_schedule":          self._read_fp_schedule,
             "skip_if_fp_event_current":  self._skip_if_fp_event_current,
             "read_current_fp_event":     self._read_current_fp_event,
             "tap_selected_research":     self._tap_selected_research,
+            "tap_template_from_setting": self._tap_template_from_setting,
             "dispatch_fp_task":          self._dispatch_fp_task,
         }
 
@@ -450,7 +583,7 @@ class ActionExecutor:
 
         if seq_path.exists():
             try:
-                with open(seq_path) as f:
+                with open(seq_path, encoding="utf-8") as f:
                     data = _json.load(f)
                 actions = data.get("actions", data) if isinstance(data, dict) else data
                 for step in actions:
@@ -1062,13 +1195,16 @@ class ActionExecutor:
         """
         Detect whether a template is visible WITHOUT tapping it.
         If found: log, execute on_found sub-actions, then abort the current task
-                  so remaining steps are skipped.
+                  so remaining steps are skipped — unless skip_to_on_found is set,
+                  in which case the task jumps to that step instead of aborting.
         If not found: return SKIPPED and continue normally.
 
         Required: template
-        Optional: log_found   — message logged when template is detected
-                  log_skip    — message logged when template is absent
-                  on_found    — list of action dicts to execute when template is visible
+        Optional: log_found        — message logged when template is detected
+                  log_skip         — message logged when template is absent
+                  on_found         — list of action dicts to execute when template is visible
+                  skip_to_on_found — 1-based step number to jump to when found
+                                     (task continues from there instead of aborting)
         """
         template = action.get("template")
         if not template:
@@ -1088,6 +1224,11 @@ class ActionExecutor:
                 if self._stop_event and self._stop_event.is_set():
                     break
                 self.execute(sub)
+            skip_to_step = action.get("skip_to_on_found")
+            if skip_to_step is not None:
+                result = self._ok(action, msg)
+                result.skip_to = int(skip_to_step) - 1
+                return result
             if skip_task_if_not_found:
                 return self._ok(action, msg)
             return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
@@ -1529,6 +1670,24 @@ class ActionExecutor:
         self._local_recorded_at = now
         return self._ok(action, f"read_local_time: {local_date} {local_time}")
 
+    def _current_server_date(self) -> str | None:
+        """
+        Best-estimate current server date, derived from logs/server_time.json.
+
+        Adds the local wall-clock time elapsed since recorded_at to the recorded
+        server datetime, so the date rolls over at server midnight instead of
+        staying pinned to the stored value for the whole freshness window.
+        Returns the OCR date format (non-padded, e.g. "2026-7-9") so it compares
+        equal against dates stored in daily_completions.json.
+        Falls back to the last known in-memory date if the file is unusable.
+        """
+        cur = estimate_server_datetime()
+        if cur is None:
+            return getattr(self, "_server_date", None)
+        derived = f"{cur.year}-{cur.month}-{cur.day}"
+        self._server_date = derived
+        return derived
+
     def _skip_if_server_time_fresh(self, action: dict) -> ActionResult:
         """
         ABORT_TASK if logs/server_time.json was written within the last 24 hours.
@@ -1543,10 +1702,17 @@ class ActionExecutor:
         p = _Path("logs/server_time.json")
         if p.exists():
             try:
-                data = _json.loads(p.read_text())
+                data = _json.loads(p.read_text(encoding="utf-8"))
                 recorded_at = _dt.fromisoformat(data.get("recorded_at", ""))
                 age = _dt.now() - recorded_at
                 if age < _td(hours=24):
+                    # Fresh file means read_server_time won't run this session —
+                    # derive the current server date (rolled past any server
+                    # midnight since the file was written) instead of restoring
+                    # the stored one verbatim.
+                    sd = self._current_server_date() or data.get("date") or data.get("server_date")
+                    if sd:
+                        self._server_date = sd
                     msg = (f"server_time fresh ({int(age.total_seconds() // 3600)}h "
                            f"{int((age.total_seconds() % 3600) // 60)}m old) — skipping")
                     if self.log_callback:
@@ -1573,16 +1739,7 @@ class ActionExecutor:
         if not task_key:
             return self._fail(action, "skip_if_done_today requires 'task_key'")
 
-        server_date = getattr(self, "_server_date", None)
-        if not server_date:
-            try:
-                p = _Path("logs/server_time.json")
-                if p.exists():
-                    server_date = _json.loads(p.read_text()).get("server_date")
-                    if server_date:
-                        self._server_date = server_date
-            except Exception:
-                pass
+        server_date = self._current_server_date()
 
         if not server_date:
             if self.log_callback:
@@ -1594,7 +1751,7 @@ class ActionExecutor:
         completions: dict = {}
         if comp_path.exists():
             try:
-                completions = _json.loads(comp_path.read_text())
+                completions = _json.loads(comp_path.read_text(encoding="utf-8"))
             except Exception:
                 pass
 
@@ -1623,7 +1780,7 @@ class ActionExecutor:
         if not task_key:
             return self._fail(action, "mark_done_today requires 'task_key'")
 
-        server_date = getattr(self, "_server_date", None)
+        server_date = self._current_server_date()
         if not server_date:
             if self.log_callback:
                 self.log_callback(f"  [daily] no server date — skipping mark for '{task_key}'")
@@ -1634,7 +1791,7 @@ class ActionExecutor:
         completions: dict = {}
         if comp_path.exists():
             try:
-                completions = _json.loads(comp_path.read_text())
+                completions = _json.loads(comp_path.read_text(encoding="utf-8"))
             except Exception:
                 pass
 
@@ -1646,6 +1803,147 @@ class ActionExecutor:
             self.log_callback(f"  [daily] marked '{task_key}' done on {server_date} (farm:{farm_key})")
 
         return self._ok(action, f"mark_done_today: '{task_key}' = {server_date}")
+
+    def _record_shield_applied(self, action: dict) -> ActionResult:
+        """
+        Record that a shield was applied so skip_if_shield_active can prevent
+        re-shielding until it expires.
+
+        Duration comes from the farm's shield.shield_type setting
+        ("8hr shield" → 8h, "24hr shield" → 24h) unless 'hours' is given.
+        State is stored in logs/shield_state.json keyed by ADB port — the same
+        per-farm convention daily_completions.json uses.
+        """
+        import json as _json
+        from datetime import datetime as _dt, timedelta as _td
+        from pathlib import Path as _Path
+
+        hours       = action.get("hours")
+        shield_type = None
+        if hours is None:
+            cfg = self.farm_settings.get("shield", {})
+            shield_type = cfg.get("shield_type", "8hr shield") if isinstance(cfg, dict) else "8hr shield"
+            hours = 24 if "24" in str(shield_type) else 8
+        hours = float(hours)
+
+        farm_key = str(getattr(self.bot, "port", "default"))
+        path  = _Path("logs/shield_state.json")
+        state: dict = {}
+        if path.exists():
+            try:
+                state = _json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+        now = _dt.now()
+        state[farm_key] = {
+            "shield_type": shield_type or f"{hours:g}hr shield",
+            "applied_at":  now.isoformat(timespec="seconds"),
+            "expires_at":  (now + _td(hours=hours)).isoformat(timespec="seconds"),
+        }
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(_json.dumps(state, indent=2))
+
+        msg = f"shield applied — active until {state[farm_key]['expires_at']} (farm:{farm_key})"
+        self._log(f"  🛡 [shield] {msg}")
+        return self._ok(action, msg)
+
+    def _skip_if_shield_active(self, action: dict) -> ActionResult:
+        """
+        ABORT_TASK if a shield recorded by record_shield_applied is still
+        active for this farm — keeps the bot from re-applying a shield
+        (and from buying one) while one is already up, even on buster day.
+        """
+        import json as _json
+        from datetime import datetime as _dt
+        from pathlib import Path as _Path
+
+        farm_key = str(getattr(self.bot, "port", "default"))
+        path = _Path("logs/shield_state.json")
+        if not path.exists():
+            return self._ok(action, "skip_if_shield_active: no shield recorded — continuing")
+        try:
+            entry   = _json.loads(path.read_text(encoding="utf-8")).get(farm_key)
+            expires = _dt.fromisoformat(entry["expires_at"]) if entry else None
+        except Exception:
+            return self._ok(action, "skip_if_shield_active: shield state unreadable — continuing")
+
+        if expires and _dt.now() < expires:
+            msg = f"shield ({entry.get('shield_type', '?')}) still active until {expires:%m-%d %H:%M} — skipping"
+            self._log(f"  🛡 [shield] {msg}")
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+
+        return self._ok(action, "skip_if_shield_active: no active shield — continuing")
+
+    def _skip_unless_enemy_buster_day(self, action: dict) -> ActionResult:
+        """
+        Gate a task on the Enemy Buster day of the weekly event cycle.
+
+        If the farm setting (default "shield.only_on_buster_day") is off, the
+        task continues unconditionally. If it is on, ABORT_TASK unless the
+        tracked day of the cycle equals buster_day (default 6 — Saturday,
+        matching the Day 1-7 numbering used by the FP schedule, Mon=1).
+
+        The current day is resolved in priority order:
+          1. The "Day N" header captured from the event calendar
+             (logs/fp_current_event.json), projected forward across server
+             midnights — the server's own numbering, most reliable.
+          2. ISO weekday of the captured server date in logs/server_time.json
+             (assumes the cycle starts on Monday).
+          3. ISO weekday of the local date (last resort).
+
+        Optional:
+          setting    - dot-path to the toggle in farm_settings
+                       (default "shield.only_on_buster_day")
+          buster_day - day number 1-7 to require (default 6)
+        """
+        import json as _json
+        from datetime import date as _date
+        from pathlib import Path as _Path
+
+        setting_path = action.get("setting", "shield.only_on_buster_day")
+        buster_day   = int(action.get("buster_day", 6))
+
+        value = self.farm_settings
+        for key in setting_path.split("."):
+            value = value.get(key) if isinstance(value, dict) else None
+        if not value:
+            return self._ok(action,
+                f"skip_unless_enemy_buster_day: '{setting_path}' is off — shielding regardless of day")
+
+        server_date = self._current_server_date()
+
+        resolved = resolve_server_day(server_date)
+        if resolved:
+            current_day, source = resolved
+        else:
+            current_day = _date.today().isoweekday()
+            source = "local date (no server date captured)"
+
+        # Pre-buster window: on the day before buster day, farms with
+        # 'Apply Shield Before Enemy Buster' enabled treat the final minutes
+        # before rollover (PRE_BUSTER_WINDOW_START onward) as buster day so
+        # they can shield just ahead of the reset.
+        pre_buster = self.farm_settings
+        for key in "shield.pre_buster_shield".split("."):
+            pre_buster = pre_buster.get(key) if isinstance(pre_buster, dict) else None
+        if pre_buster and current_day == (buster_day - 2) % 7 + 1:
+            est = estimate_server_datetime()
+            if est is not None and (est.hour, est.minute) >= PRE_BUSTER_WINDOW_START:
+                msg = (f"pre-buster window (day {current_day}, server "
+                       f"{est.hour:02d}:{est.minute:02d}) — treating as Enemy Buster day")
+                self._log(f"  🛡 [shield] {msg}")
+                return self._ok(action, msg)
+
+        if current_day == buster_day:
+            msg = f"Enemy Buster day confirmed (day {current_day}, from {source}) — continuing"
+            self._log(f"  [shield] {msg}")
+            return self._ok(action, msg)
+
+        msg = (f"not Enemy Buster day (day {current_day}, from {source}, "
+               f"need day {buster_day}) — skipping shield")
+        self._log(f"  ⏭ [shield] {msg}")
+        return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
 
     # ------------------------------------------------------------------
     # Full Preparedness schedule helpers
@@ -1660,14 +1958,7 @@ class ActionExecutor:
         from datetime import date as _date, timedelta as _td
         from pathlib import Path as _Path
 
-        server_date = getattr(self, "_server_date", None)
-        if not server_date:
-            try:
-                p = _Path("logs/server_time.json")
-                if p.exists():
-                    server_date = _json.loads(p.read_text()).get("server_date")
-            except Exception:
-                pass
+        server_date = self._current_server_date()
 
         if server_date:
             try:
@@ -1684,7 +1975,7 @@ class ActionExecutor:
         sched_path = _Path("logs/fp_schedule.json")
         if sched_path.exists():
             try:
-                data = _json.loads(sched_path.read_text())
+                data = _json.loads(sched_path.read_text(encoding="utf-8"))
                 day_slots = data.get("days", {}).get(today_day, {})
                 if data.get("cycle_start_date") == cycle_start and len(day_slots) >= 6:
                     msg = f"FP Day {today_day} fully captured ({len(day_slots)} slots) for week of {cycle_start} — skipping"
@@ -1742,16 +2033,7 @@ class ActionExecutor:
         from datetime import datetime as _dt, date as _date, timedelta as _td
         from pathlib import Path as _Path
 
-        server_date = getattr(self, "_server_date", None)
-        if not server_date:
-            try:
-                p = _Path("logs/server_time.json")
-                if p.exists():
-                    server_date = _json.loads(p.read_text()).get("server_date")
-                    if server_date:
-                        self._server_date = server_date
-            except Exception:
-                pass
+        server_date = self._current_server_date()
 
         current_day_num: str | None = None
         cycle_start_str: str | None = None
@@ -1849,7 +2131,7 @@ class ActionExecutor:
         existing_data: dict = {}
         if sched_path.exists():
             try:
-                existing_data = _json.loads(sched_path.read_text())
+                existing_data = _json.loads(sched_path.read_text(encoding="utf-8"))
                 # Migrate old single-day format
                 if "schedule" in existing_data and "days" not in existing_data:
                     old = existing_data
@@ -1970,35 +2252,108 @@ class ActionExecutor:
             self.log_callback(f"  ✗ {msg}")
         return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
 
+    def _tap_template_from_setting(self, action: dict) -> ActionResult:
+        """
+        Tap the template mapped from a farm-setting value, scrolling down to
+        find it if it isn't visible yet.
+
+        Required action fields:
+            setting - dot-path into farm_settings, e.g. "shield.shield_type"
+            map     - dict of setting value → template filename, e.g.
+                      {"8hr shield": "btn_8_hr_shield.png",
+                       "24hr shield": "btn_24_hr_shield.png"}
+
+        Optional (same scroll knobs as tap_selected_research):
+            required      - if True, ABORT_TASK when not found after scrolling
+                            (default False — log and continue so later actions
+                            can handle the not-found case)
+            tap_offset_x  : pixels to offset the tap right of the match centre (default 0)
+            tap_offset_y  : pixels to offset the tap below the match centre (default 0)
+                            (use to avoid tapping a dead inner image, e.g. tap the
+                            price bar at the bottom of a shop item card)
+            max_scrolls   : scroll-down retries before giving up (default 1)
+            scroll_x_pct  : X centre of scroll swipe as % of width  (default 50)
+            scroll_y_pct  : Y centre of scroll swipe as % of height (default 60)
+            distance_pct  : swipe distance as % of screen height    (default 40)
+            duration_ms   : swipe duration in milliseconds          (default 500)
+            wait_seconds  : pause after each scroll before rechecking (default 1.5)
+            threshold     : vision confidence override (optional)
+        """
+        import time as _time
+
+        setting_path = action.get("setting")
+        tmpl_map     = action.get("map")
+        if not setting_path or not isinstance(tmpl_map, dict):
+            return self._fail(action, "tap_template_from_setting requires 'setting' and 'map'")
+
+        value = self.farm_settings
+        for key in setting_path.split("."):
+            value = value.get(key) if isinstance(value, dict) else None
+        tmpl = tmpl_map.get(str(value)) if value is not None else None
+        if not tmpl:
+            msg = (f"tap_template_from_setting: no template for '{setting_path}' "
+                   f"value '{value}' — stopping task")
+            if self.log_callback:
+                self.log_callback(f"  ✗ {msg}")
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+
+        required     = action.get("required", False)
+        threshold    = float(action.get("threshold")) if action.get("threshold") is not None else None
+        max_scrolls  = int(action.get("max_scrolls", 1))
+        scroll_x_pct = float(action.get("scroll_x_pct", 50))
+        scroll_y_pct = float(action.get("scroll_y_pct", 60))
+        distance_pct = float(action.get("distance_pct", 40))
+        duration_ms  = int(action.get("duration_ms", 500))
+        wait_secs    = float(action.get("wait_seconds", 1.5))
+        tap_off_x    = int(action.get("tap_offset_x", 0))
+        tap_off_y    = int(action.get("tap_offset_y", 0))
+        path = self._template_path(tmpl)
+
+        def _check():
+            ss   = self.bot.screenshot()
+            m    = self.vision.find_template(ss, path, threshold=threshold)
+            conf = getattr(m, "confidence", 0) if m else 0
+            self._log(f"  [setting_tap] '{value}' ({tmpl}) conf={conf:.3f} found={bool(m)}")
+            return m
+
+        match = _check()
+        if match:
+            self.bot.tap(match.x + tap_off_x, match.y + tap_off_y)
+            return self._ok(action, f"tap_template_from_setting: tapped '{value}'")
+
+        w, h = self._screen_size()
+        cx = int(w * scroll_x_pct / 100)
+        cy = int(h * scroll_y_pct / 100)
+        dy = int(h * distance_pct / 100)
+        for i in range(max_scrolls):
+            if self._stop_event and self._stop_event.is_set():
+                return ActionResult(status=ActionStatus.SKIPPED, action=action,
+                                    message="Bot stopped")
+            self._log(f"  [setting_tap] not found — scrolling down ({i+1}/{max_scrolls})")
+            self.bot.swipe(cx, cy, cx, cy - dy, duration_ms=duration_ms)
+            _time.sleep(wait_secs)
+            match = _check()
+            if match:
+                self.bot.tap(match.x + tap_off_x, match.y + tap_off_y)
+                return self._ok(action,
+                    f"tap_template_from_setting: tapped '{value}' after scroll")
+
+        msg = (f"tap_template_from_setting: '{value}' ({tmpl}) not found after "
+               f"{max_scrolls} scroll(s)")
+        if required:
+            if self.log_callback:
+                self.log_callback(f"  ✗ {msg} — stopping task")
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+        self._log(f"  [setting_tap] {msg} — continuing")
+        return self._ok(action, f"{msg} — continuing")
+
     def _get_estimated_server_time(self) -> tuple | None:
         """
         Returns (hour, minute) estimated current server time using server_time.json
         plus elapsed local wall-clock time.  Returns None if unavailable.
         """
-        import json as _json
-        from datetime import datetime as _dt
-        from pathlib import Path as _Path
-
-        try:
-            p = _Path("logs/server_time.json")
-            if not p.exists():
-                return None
-            data = _json.loads(p.read_text())
-            sv_time_str  = data.get("time") or data.get("server_time", "")
-            recorded_str = data.get("recorded_at", "")
-            if not sv_time_str:
-                return None
-            parts = sv_time_str.split(":")
-            h, m, s = int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0
-            sv_seconds = h * 3600 + m * 60 + s
-            try:
-                elapsed = (_dt.now() - _dt.fromisoformat(recorded_str)).total_seconds()
-            except Exception:
-                elapsed = 0
-            current = sv_seconds + elapsed
-            return (int(current // 3600) % 24, int((current % 3600) // 60))
-        except Exception:
-            return None
+        est = estimate_server_datetime()
+        return (est.hour, est.minute) if est is not None else None
 
     def _fp_slot_is_current(self, slot_time: str, srv: tuple) -> bool:
         """Return True if slot_time (HH:MM) is the active 4-hour window for server (hour, min)."""
@@ -2027,7 +2382,7 @@ class ActionExecutor:
             return self._ok(action, "skip_if_fp_event_current: no event captured yet — continuing")
 
         try:
-            data      = _json.loads(p.read_text())
+            data      = _json.loads(p.read_text(encoding="utf-8"))
             slot_time = data.get("slot_time", "")
             task_name = data.get("task", "unknown")
         except Exception:
@@ -2081,6 +2436,39 @@ class ActionExecutor:
         if self.log_callback:
             self.log_callback(f"  [fp_event] green band y={y_min}..{y_max}")
 
+        # OCR the area above the green band for the nearest "Day N" section
+        # header — the calendar's own day numbering, so no assumption about
+        # which weekday the cycle starts on. The header closest above the
+        # highlighted row is the current server day.
+        day_num, day_y = None, -1
+        try:
+            hdr_results = self.vision.read_text(ss, region=(0, 0, w, y_min), min_confidence=0.3)
+            for r in hdr_results:
+                m = _re.search(r'\bday\b\s*(\d)?', r.text, _re.IGNORECASE)
+                if m and r.y > day_y:
+                    day_y  = r.y
+                    day_num = int(m.group(1)) if m.group(1) else None
+            if day_y >= 0 and day_num is None:
+                # The digit didn't survive the full-screen pass (header text is
+                # small) — re-OCR a 3x-upscaled crop of just the header band.
+                import numpy as _np
+                from PIL import Image as _Image
+                band = img.crop((0, max(0, day_y - 18), w, min(h, day_y + 18)))
+                band = band.resize((band.width * 3, band.height * 3), _Image.LANCZOS)
+                self.vision._ensure_ocr()
+                for _bbox, _txt, _conf in self.vision._ocr_reader.readtext(_np.array(band)):
+                    if _re.fullmatch(r'[1-7]', _txt.strip()):
+                        day_num = int(_txt.strip())
+                        break
+            if self.log_callback:
+                if day_num:
+                    self.log_callback(f"  [fp_event] current server day: {day_num} (header at y={day_y})")
+                else:
+                    self.log_callback("  ⚠ [fp_event] no 'Day N' header found above the highlighted row")
+        except Exception as e:
+            if self.log_callback:
+                self.log_callback(f"  ⚠ [fp_event] day header OCR failed: {e}")
+
         raw_results = self.vision.read_text(ss, region=(0, y_min, w, y_max), min_confidence=0.25)
         raw = " ".join(r.text for r in raw_results)
         if self.log_callback:
@@ -2108,6 +2496,11 @@ class ActionExecutor:
             "task":        task_name,
             "recorded_at": _dt.now().isoformat(timespec="seconds"),
         }
+        if day_num:
+            out["day"] = day_num
+            # Server date at capture time — lets skip_unless_enemy_buster_day
+            # project the day forward across server midnights.
+            out["day_server_date"] = self._current_server_date()
         _Path("logs/fp_current_event.json").write_text(_json.dumps(out, indent=2))
         if self.log_callback:
             self.log_callback(f"  [fp_event] {slot_time} → {task_name} — saved")
@@ -2130,7 +2523,7 @@ class ActionExecutor:
                                 message="dispatch_fp_task: no current event captured")
 
         try:
-            data      = _json.loads(p.read_text())
+            data      = _json.loads(p.read_text(encoding="utf-8"))
             slot_time = data["slot_time"]
             active_task = data["task"]
         except Exception as e:
@@ -2981,7 +3374,13 @@ class ActionExecutor:
 
     def _run_task(self, action: dict) -> ActionResult:
         """
-        Unconditionally load and execute all actions from a sub-task JSON file.
+        Load and execute all actions from a sub-task JSON file.
+
+        Optional:
+          setting       - dot-path into farm_settings (e.g. "shield.buy_from_alliance_store");
+                          if present and the value is falsy, the sub-task is skipped
+          contain_abort - if true, an ABORT_TASK from inside the sub-task ends only
+                          the sub-task; the parent task keeps running
 
         Example:
           {"action": "run_task", "task": "fp_reward_collection.json"}
@@ -2990,6 +3389,16 @@ class ActionExecutor:
         task_name = action.get("task")
         if not task_name:
             return self._fail(action, "run_task requires 'task'")
+
+        setting_path = action.get("setting")
+        if setting_path:
+            value = self.farm_settings
+            for key in setting_path.split("."):
+                value = value.get(key) if isinstance(value, dict) else None
+            if not value:
+                msg = f"run_task: '{setting_path}' is off — skipping '{task_name}'"
+                self._log(f"  ⏭ {msg}")
+                return ActionResult(status=ActionStatus.SKIPPED, action=action, message=msg)
 
         task_path = get_resource_dir() / "tasks" / task_name
         if not task_path.exists():
@@ -3009,6 +3418,10 @@ class ActionExecutor:
                 break
             result = self.execute(sub_action)
             if result.status == ActionStatus.ABORT_TASK:
+                if action.get("contain_abort"):
+                    msg = f"'{task_name}' backed out: {result.message}"
+                    self._log(f"  ⏭ [run_task] {msg} — continuing parent task")
+                    return ActionResult(status=ActionStatus.SKIPPED, action=action, message=msg)
                 return result
 
         return self._ok(action, f"run_task: '{task_name}' complete")
@@ -3499,6 +3912,8 @@ class ActionExecutor:
         templates          : list of template filenames to try in order (required)
         threshold          : vision confidence override (optional)
         required           : if False, returns SKIPPED when none found (default False)
+        abort_task_if_not_found : if True, gracefully end the whole task when
+                                  none are found (overrides 'required')
         not_found_retries  : number of additional attempts if nothing is found (default 0)
         retry_delay        : seconds to wait between retry attempts (default 1.0)
         log_skip           : message to log when none found after all retries
@@ -3530,6 +3945,8 @@ class ActionExecutor:
         skip_msg = action.get("log_skip", f"None of {templates} found — skipping")
         if self.log_callback:
             self.log_callback(f"  ⏭ {skip_msg}")
+        if action.get("abort_task_if_not_found", False):
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=skip_msg)
         if not action.get("required", False):
             return ActionResult(status=ActionStatus.SKIPPED, action=action, message=skip_msg)
         return self._fail(action, skip_msg)
@@ -3681,6 +4098,46 @@ class ActionExecutor:
                     return sub_result
 
         return self._ok(action, f"Repeated tap '{template}' x{taps}")
+
+    def _long_press_template(self, action: dict) -> ActionResult:
+        """
+        Find a template and press-and-hold it instead of tapping.
+
+        Useful for buttons the game auto-repeats while held (e.g. alliance
+        tech donate), replacing dozens of individual taps with one hold.
+
+        Required:
+          template     - template filename
+
+        Optional:
+          duration_ms  - how long to hold, in milliseconds (default 3000)
+          threshold    - vision confidence override
+          required     - if False, returns SKIPPED when not found (default True)
+          log_skip     - message logged when the template is not found
+        """
+        template = action.get("template")
+        if not template:
+            return self._fail(action, "long_press_template requires 'template'")
+        duration_ms = int(action.get("duration_ms", 3000))
+        threshold   = float(action.get("threshold")) if action.get("threshold") is not None else None
+
+        screenshot = self.bot.screenshot()
+        path  = self._template_path(template)
+        match = self.vision.find_template(screenshot, path, threshold=threshold)
+        conf  = getattr(match, "confidence", 0) if match else 0
+        self._log(f"  [long_press_template] '{template}' conf={conf:.3f} found={bool(match)}")
+
+        if match:
+            self._log(f"  [long_press_template] holding ({match.x}, {match.y}) for {duration_ms}ms")
+            self.bot.long_press(match.x, match.y, duration_ms)
+            return self._ok(action, f"Long-pressed '{template}' for {duration_ms}ms")
+
+        skip_msg = action.get("log_skip", f"'{template}' not found — nothing to long-press")
+        if self.log_callback:
+            self.log_callback(f"  ⏭ {skip_msg}")
+        if not action.get("required", True):
+            return ActionResult(status=ActionStatus.SKIPPED, action=action, message=skip_msg)
+        return self._fail(action, skip_msg)
 
     def _tap_active_alliance_mine(self, action: dict) -> ActionResult:
         """
@@ -3900,6 +4357,14 @@ class ActionExecutor:
             max_attempts - safety cap on total taps (default 20)
             tap_delay    - seconds to wait between taps (default 1.0)
             threshold    - vision confidence override
+            force        - re-run the adjust loop even if this level was
+                           already set previously (default False)
+
+        The game keeps the level slider where it was last set, so once the
+        target is reached the result is recorded in logs/boomer_level_state.json
+        (per farm port + setting path) and later runs skip the adjust loop
+        entirely. Changing the setting value re-triggers adjustment; delete the
+        state file or pass "force": true to re-adjust manually.
 
         Example JSON:
             {
@@ -3929,6 +4394,39 @@ class ActionExecutor:
             return self._ok(action, f"Skipped: '{setting_path}' not configured")
         target = int(value)
         self._log(f"  [adjust_boomer_level] target level = {target}")
+
+        # ── Persistent skip: the slider keeps its value between rallies ──
+        # Re-detecting every run only gives template misreads a chance to tap
+        # a correct level away, so once set successfully we remember it.
+        import json as _json
+        from pathlib import Path as _Path
+        state_path = _Path("logs/boomer_level_state.json")
+        farm_key   = str(getattr(self.bot, "port", "default"))
+
+        if not action.get("force", False):
+            try:
+                state = _json.loads(state_path.read_text(encoding="utf-8"))
+                if state.get(farm_key, {}).get(setting_path) == target:
+                    msg = f"Boomer level already set to {target} on a previous run — skipping adjustment"
+                    self._log(f"  [adjust_boomer_level] {msg}")
+                    return self._ok(action, msg)
+            except Exception:
+                pass
+
+        def remember_level_set():
+            try:
+                state = {}
+                if state_path.exists():
+                    try:
+                        state = _json.loads(state_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        state = {}
+                state_path.parent.mkdir(exist_ok=True)
+                state.setdefault(farm_key, {})[setting_path] = target
+                state_path.write_text(_json.dumps(state, indent=2), encoding="utf-8")
+                self._log(f"  [adjust_boomer_level] remembered level {target} for farm {farm_key}")
+            except Exception:
+                pass
 
         def detect_current_level(screenshot) -> int | None:
             """Locate the level display via the best-matching level template, then
@@ -4003,6 +4501,7 @@ class ActionExecutor:
             self._log(f"  [adjust_boomer_level] attempt {attempt}: current={current} target={target}")
 
             if current == target:
+                remember_level_set()
                 return self._ok(action, f"Boomer level set to {target}")
 
             # ── Oscillation detection ─────────────────────────────────
@@ -4020,6 +4519,7 @@ class ActionExecutor:
                             f"  [adjust_boomer_level] oscillation detected between {lo} and {hi} "
                             f"— target {target} is between them, likely a template misread. Accepting."
                         )
+                        remember_level_set()
                         return self._ok(action, f"Boomer level set to {target} (oscillation resolved)")
 
             if current < target:
@@ -4502,7 +5002,7 @@ class ActionExecutor:
         counts: dict = {}
         if counts_path.exists():
             try:
-                with open(counts_path) as f:
+                with open(counts_path, encoding="utf-8") as f:
                     counts = _json.load(f)
             except Exception:
                 counts = {}
@@ -4541,7 +5041,7 @@ class ActionExecutor:
         counts: dict = {}
         if counts_path.exists():
             try:
-                with open(counts_path) as f:
+                with open(counts_path, encoding="utf-8") as f:
                     counts = _json.load(f)
             except Exception:
                 counts = {}
