@@ -2345,7 +2345,11 @@ class ActionExecutor:
                 self.log_callback(f"  ✗ {msg} — stopping task")
             return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
         self._log(f"  [setting_tap] {msg} — continuing")
-        return self._ok(action, f"{msg} — continuing")
+        # SKIPPED, not SUCCESS: nothing was tapped, so a set_flag on this
+        # action must record False (e.g. shield.json's 'shield_found' gate
+        # decides whether the buy-shield fallbacks run).
+        return ActionResult(status=ActionStatus.SKIPPED, action=action,
+                            message=f"{msg} — continuing")
 
     def _get_estimated_server_time(self) -> tuple | None:
         """
