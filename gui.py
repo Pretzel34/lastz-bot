@@ -2011,11 +2011,25 @@ class BotApp(ctk.CTk):
                         _st_actions = (_st_data.get("actions", [])
                                        if isinstance(_st_data, dict) else _st_data)
                         self.after(0, lambda: self._log("  ▶ Reading server time...", "info"))
+                        _st_ok = True
                         for _act in _st_actions:
                             if engine._stop_event.is_set():
                                 return
-                            executor.execute(_act)
-                        self.after(0, lambda: self._log("  ✓ Server time recorded", "success"))
+                            _res = executor.execute(_act)
+                            if _res.status == ActionStatus.ABORT_TASK:
+                                # Graceful skip (e.g. server time still fresh)
+                                self.after(0, lambda m=_res.message: self._log(
+                                    f"  ⏭ check_server_time skipped: {m}", "info"))
+                                _st_ok = False
+                                break
+                            if (_res.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
+                                    and _act.get("required", True)):
+                                self.after(0, lambda m=_res.message: self._log(
+                                    f"  ✗ check_server_time failed: {m} — aborting step", "warn"))
+                                _st_ok = False
+                                break
+                        if _st_ok:
+                            self.after(0, lambda: self._log("  ✓ Server time recorded", "success"))
                     except Exception as _e:
                         self.after(0, lambda err=_e: self._log(
                             f"  ⚠ check_server_time error: {err}", "warn"))
@@ -2037,11 +2051,25 @@ class BotApp(ctk.CTk):
                         _fp_actions = (_fp_data.get("actions", [])
                                        if isinstance(_fp_data, dict) else _fp_data)
                         self.after(0, lambda: self._log("  ▶ Reading current Full Preparedness event...", "info"))
+                        _fp_ok = True
                         for _act in _fp_actions:
                             if engine._stop_event.is_set():
                                 return
-                            executor.execute(_act)
-                        self.after(0, lambda: self._log("  ✓ FP event captured", "success"))
+                            _res = executor.execute(_act)
+                            if _res.status == ActionStatus.ABORT_TASK:
+                                # Graceful skip (e.g. captured FP event still current)
+                                self.after(0, lambda m=_res.message: self._log(
+                                    f"  ⏭ check_event_calander skipped: {m}", "info"))
+                                _fp_ok = False
+                                break
+                            if (_res.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
+                                    and _act.get("required", True)):
+                                self.after(0, lambda m=_res.message: self._log(
+                                    f"  ✗ check_event_calander failed: {m} — aborting step", "warn"))
+                                _fp_ok = False
+                                break
+                        if _fp_ok:
+                            self.after(0, lambda: self._log("  ✓ FP event captured", "success"))
                     except Exception as _e:
                         self.after(0, lambda err=_e: self._log(
                             f"  ⚠ check_event_calander error: {err}", "warn"))
@@ -2798,6 +2826,15 @@ class BotApp(ctk.CTk):
             self.log_box.insert("end", f"[{ts}] {message}\n", level)
             self.log_box.see("end")
             self.log_box.configure(state="disabled")
+            # Persist the pane to a daily file — executor/pre-farm detail only
+            # exists here, and losing it makes failed runs undiagnosable.
+            try:
+                Path("logs").mkdir(exist_ok=True)
+                with open(f"logs/gui_{datetime.now():%Y%m%d}.log", "a",
+                          encoding="utf-8") as _gf:
+                    _gf.write(f"[{ts}] {message}\n")
+            except Exception:
+                pass
         self.after(0, _do)
 
     def _clear_log(self):
