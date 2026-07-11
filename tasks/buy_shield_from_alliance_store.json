@@ -35,8 +35,9 @@
       },
       "max_scrolls": 1,
       "wait_seconds": 4.0,
+      "tap_offset_y": 55,
       "required": false,
-      "note": "Step 5: tap the shop listing for the shield type selected in farm settings"
+      "note": "Step 5: find the shop card for the shield type selected in farm settings. The icon-only templates avoid the mutable Storage:N text; tap 55px below the icon centre (measured from btn_alliance_store_* captures) so the tap lands on the Storage bar, not the dead inner icon"
     },
     {
       "action": "wait",

@@ -45,14 +45,14 @@
       "action": "tap_template_from_setting",
       "setting": "shield.shield_type",
       "map": {
-        "8hr shield": "btn_item_8_shield.png",
-        "24hr shield": "btn_item_24_shield.png"
+        "8hr shield": "btn_item_8_shield_icon.png",
+        "24hr shield": "btn_item_24_shield_icon.png"
       },
       "max_scrolls": 1,
       "wait_seconds": 4.0,
-      "tap_offset_y": 62,
+      "tap_offset_y": 113,
       "required": true,
-      "note": "Step 9: find the shop card for the shield type selected in farm settings; if not visible, scroll down, wait 4s, and look again. Tap 62px below the card centre so the tap lands on the diamond-price bar instead of the dead shield icon. Backs out of the task if not found after scrolling."
+      "note": "Step 9: find the shop card for the shield type selected in farm settings; if not visible, scroll down, wait 4s, and look again. The *_icon templates are cropped above the owned-count badge (which changes after every purchase); tap 113px below the icon centre so the tap lands on the diamond-price bar instead of the dead shield icon. Backs out of the task if not found after scrolling."
     },
     {
       "action": "wait",
