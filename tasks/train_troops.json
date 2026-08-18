@@ -1,0 +1,298 @@
+{
+  "name": "train_troops",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "note": "Guarantee HQ view before searching for the Training Center — required to search for it appropriately"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "skip_to_unless_setting",
+      "setting": "train_troops.enable_assaulter",
+      "skip_to": 20,
+      "note": "Assaulter Training toggle off — skip to the Rider section"
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_training_center.png",
+      "required": true,
+      "note": "Sweep the full HQ view for the Training Center, same as the resource-collection sweep — hard-required: nothing downstream works without it"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_troop.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_more.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_to_soldier_training.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_troop_icon.png",
+      "required": false,
+      "note": "Universal icon for all soldier types"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "select_troop_level",
+      "setting": "train_troops.assaulter_level",
+      "template_pattern": "btn_assaulter_{value}.png",
+      "required": false,
+      "note": "Scrolls left to find the configured level (or scans 10 down to 1 for the highest unlocked tier if set to Promote Troops). Levels 8-10 not captured yet."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_start_train_troops.png",
+      "required": false,
+      "note": "Universal Start Training button (not Speed Up) — confirms training at the level selected above. If matched, fall through to the normal back-out below."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "required": false,
+      "log_skip": "No back button found — could not back out of the Assaulter training panel"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "skip_to_unless_setting",
+      "setting": "train_troops.enable_rider",
+      "skip_to": 37,
+      "note": "Rider Training toggle off — skip to the Shooter section"
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_training_center.png",
+      "required": true,
+      "note": "Re-enter fresh for Rider — the type appears to be committed within the train_troop/train_more steps below, not at btn_go_to_soldier_training itself"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_troop.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_more.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_to_soldier_training.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_troop_icon.png",
+      "required": false,
+      "note": "Universal icon for all soldier types"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "select_troop_level",
+      "setting": "train_troops.rider_level",
+      "template_pattern": "btn_rider_{value}.png",
+      "required": false,
+      "note": "Scrolls left to find the configured level (or scans 10 down to 1 for the highest unlocked tier if set to Promote Troops). Levels 8-10 not captured yet."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_start_train_troops.png",
+      "required": false,
+      "note": "Universal Start Training button (not Speed Up) — confirms training at the level selected above. If matched, fall through to the normal back-out below."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "required": false,
+      "log_skip": "No back button found — could not back out of the Rider training panel"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "skip_to_unless_setting",
+      "setting": "train_troops.enable_shooter",
+      "skip_to": 54,
+      "note": "Shooter Training toggle off — skip to the exit step"
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_training_center.png",
+      "required": true,
+      "note": "Re-enter fresh for Shooter"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_troop.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_more.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_to_soldier_training.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_troop_icon.png",
+      "required": false,
+      "note": "Universal icon for all soldier types"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "select_troop_level",
+      "setting": "train_troops.shooter_level",
+      "template_pattern": "btn_shooter_{value}.png",
+      "required": false,
+      "note": "Scrolls left to find the configured level (or scans 10 down to 1 for the highest unlocked tier if set to Promote Troops). Levels 8-10 not captured yet."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_start_train_troops.png",
+      "required": false,
+      "note": "Universal Start Training button (not Speed Up) — confirms training at the level selected above. If matched, fall through to the normal back-out below."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "required": false,
+      "log_skip": "No back button found — could not back out of the Shooter training panel"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "required": false,
+      "log_skip": "No back button found — could not back out to HQ view",
+      "note": "Safety-net exit — lands here directly if every section above was skipped"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    }
+  ]
+}

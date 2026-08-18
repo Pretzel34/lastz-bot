@@ -2,8 +2,19 @@
   "name": "army_expansion",
   "actions": [
     {
-      "action": "wait",
-      "seconds": 2.0
+      "action": "run_task",
+      "task": "train_troops_for_fp.json",
+      "note": "Army Expansion FP objective — loops through all 3 troop types (find camp -> train -> speed up -> collect) before moving on to chest collection below. Independent of the farm's own train_troops.* settings, same as before. Supersedes the earlier train_troops_fp.json (camp-tap only, no speed-up) now that this does everything that one did plus training/speed-up/collect."
+    },
+    {
+      "action": "run_task",
+      "task": "fp_reward_collection.json",
+      "note": "Claim any FP rewards unlocked by training above — same pattern hero_progression.json/age_of_science.json use"
+    },
+    {
+      "action": "run_task",
+      "task": "start_train_troops_fp.json",
+      "note": "Unconditional — runs every single pass regardless of chest-collection outcome above. Loops all 3 troop types (find camp -> select Highest Tier -> start training, NO speed-up/collect) so every camp has fresh training queued for the next FP event, independent of the farm's own train_troops.* settings — same assumption as the rest of this task: if Army Expansion is enabled, all 3 types should be kept training. train_troops_alt.json wasn't used here since it only ever starts ONE type per run (shared-final-stop design) — see project memory."
     }
   ]
 }

@@ -1,0 +1,410 @@
+{
+  "name": "train_troops_for_fp",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "note": "Guarantee HQ view before anything else"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Nav to world view — first half of the center-camera round trip"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_headquarters.png",
+      "required": false,
+      "note": "Back to HQ view, now centered — do this before any scroll-based search below"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_assaulter_camp.png",
+      "fallback_template": "btn_assaulter_camp_alt.png",
+      "required": false,
+      "note": "Always attempted regardless of train_troops.enable_assaulter — this FP flow is independent of the farm's normal train_troops settings, same as train_troops_fp.json"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "note": "Settle after entering the building before checking for the training-tab icon"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_assaulter_icon.png",
+      "fallback_templates": [
+        "btn_train_rider_icon.png",
+        "btn_train_shooter_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 17,
+      "note": "Icon that opens the Assaulter training tab (also accepts the Rider/Shooter icon as a fallback) — found means Assaulter is fully located and entered, jump straight to tier selection"
+    },
+    {
+      "action": "scroll_down",
+      "note": "None of the 3 training icons found on the first check — scroll down once and retry before giving up on this building"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_assaulter_icon.png",
+      "fallback_templates": [
+        "btn_train_rider_icon.png",
+        "btn_train_shooter_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 17,
+      "note": "Retry the same check after one scroll down"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Still not found after scrolling — recenter camera before the Rider search."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_headquarters.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "select_troop_level",
+      "setting": "fp.army_expansion.assaulter",
+      "template_pattern": "btn_tier_assaulter_{word}_troop.png",
+      "value_override": "Highest Tier",
+      "promote_value": "Highest Tier",
+      "locked_template": "btn_locked_tier_universal.png",
+      "tile_spacing_px": 99,
+      "required": false,
+      "threshold": 0.9,
+      "scroll_y_pct": 81,
+      "note": "Always trains the highest currently-unlocked Assaulter tier, independent of the farm's train_troops.assaulter_level setting — same value_override approach as train_troops_fp.json. No skip_to here — falls straight into this type's own inline speed-up tail below."
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0,
+      "note": "Settle after tier selection before checking for the Start Training button"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_start_train_troops.png",
+      "required": false,
+      "note": "First attempt. Not found here just means troops are already training — not an error."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_start_train_troops.png",
+      "required": false,
+      "note": "Second attempt — same template, checked again after the wait above"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "repeat_if_template",
+      "template": "btn_use_speed_up_train.png",
+      "note": "Keep tapping the speed-up button until it's no longer present — each tap consumes a speed-up until training is instantly complete"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0,
+      "note": "Speed-up finished — btn_use_speed_up_train is gone now; the collect button for this specific troop type appears in its place"
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_assaulter_collect.png",
+        "btn_assaulter_collect_alt.png"
+      ],
+      "required": false,
+      "log_skip": "No assaulter collect button found",
+      "note": "Only this type's collect templates are checked here since this tail is now specific to this troop type"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Recenter before the Rider search."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_headquarters.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_rider_camp.png",
+      "fallback_template": "btn_rider_camp_alt.png",
+      "required": false,
+      "note": "Always attempted regardless of train_troops.enable_rider"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_rider_icon.png",
+      "fallback_templates": [
+        "btn_train_assaulter_icon.png",
+        "btn_train_shooter_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 40,
+      "note": "Icon that opens the Rider training tab (also accepts Assaulter/Shooter as fallback)"
+    },
+    {
+      "action": "scroll_down",
+      "note": "None of the 3 training icons found on the first check — scroll down once and retry"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_rider_icon.png",
+      "fallback_templates": [
+        "btn_train_assaulter_icon.png",
+        "btn_train_shooter_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 40,
+      "note": "Retry the same check after one scroll down"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Still not found after scrolling — recenter camera before the Shooter search, same as after Assaulter above"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_headquarters.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "select_troop_level",
+      "setting": "fp.army_expansion.rider",
+      "template_pattern": "btn_tier_rider_{word}_troop.png",
+      "value_override": "Highest Tier",
+      "promote_value": "Highest Tier",
+      "locked_template": "btn_locked_tier_universal.png",
+      "tile_spacing_px": 99,
+      "required": false,
+      "threshold": 0.9,
+      "scroll_y_pct": 81,
+      "note": "Same as the Assaulter step above, independent of train_troops.rider_level"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0,
+      "note": "Settle after tier selection before checking for the Start Training button"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_start_train_troops.png",
+      "required": false,
+      "note": "First attempt. Not found here just means troops are already training — not an error."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_start_train_troops.png",
+      "required": false,
+      "note": "Second attempt — same template, checked again after the wait above"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "repeat_if_template",
+      "template": "btn_use_speed_up_train.png",
+      "note": "Keep tapping the speed-up button until it's no longer present — each tap consumes a speed-up until training is instantly complete"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0,
+      "note": "Speed-up finished — btn_use_speed_up_train is gone now; the collect button for this specific troop type appears in its place"
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_rider_collect.png",
+        "btn_rider_collect_alt.png"
+      ],
+      "required": false,
+      "log_skip": "No rider collect button found",
+      "note": "Only this type's collect templates are checked here since this tail is now specific to this troop type"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Recenter before the Shooter search."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_headquarters.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_shooter_camp.png",
+      "fallback_template": "btn_shooter_camp_alt.png",
+      "required": false,
+      "note": "Always attempted regardless of train_troops.enable_shooter — last priority type"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_shooter_icon.png",
+      "fallback_templates": [
+        "btn_train_assaulter_icon.png",
+        "btn_train_rider_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 59,
+      "note": "Icon that opens the Shooter training tab (also accepts Assaulter/Rider as fallback)"
+    },
+    {
+      "action": "scroll_down",
+      "note": "None of the 3 training icons found on the first check — scroll down once and retry"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_shooter_icon.png",
+      "fallback_templates": [
+        "btn_train_assaulter_icon.png",
+        "btn_train_rider_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 59,
+      "note": "Retry after one scroll down. If STILL not found, nothing was located for any of the 3 types — end the task here.",
+      "skip_task_if_not_found": true
+    },
+    {
+      "action": "select_troop_level",
+      "setting": "fp.army_expansion.shooter",
+      "template_pattern": "btn_tier_shooter_{word}_troop.png",
+      "value_override": "Highest Tier",
+      "promote_value": "Highest Tier",
+      "locked_template": "btn_locked_tier_universal.png",
+      "tile_spacing_px": 99,
+      "required": false,
+      "threshold": 0.9,
+      "scroll_y_pct": 81,
+      "note": "Same as above, independent of train_troops.shooter_level"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0,
+      "note": "Settle after tier selection before checking for the Start Training button"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_start_train_troops.png",
+      "required": false,
+      "note": "First attempt. Not found here just means troops are already training — not an error."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_start_train_troops.png",
+      "required": false,
+      "note": "Second attempt — same template, checked again after the wait above"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "repeat_if_template",
+      "template": "btn_use_speed_up_train.png",
+      "note": "Keep tapping the speed-up button until it's no longer present — each tap consumes a speed-up until training is instantly complete"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0,
+      "note": "Speed-up finished — btn_use_speed_up_train is gone now; the collect button for this specific troop type appears in its place"
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_shooter_collect.png",
+        "btn_shooter_collect_alt.png"
+      ],
+      "required": false,
+      "log_skip": "No shooter collect button found",
+      "note": "Only this type's collect templates are checked here since this tail is now specific to this troop type"
+    }
+  ]
+}

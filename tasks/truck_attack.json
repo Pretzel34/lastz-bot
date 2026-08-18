@@ -9,7 +9,8 @@
     {
       "action": "if_template_tap",
       "template": "btn_truck_icon.png",
-      "required": false
+      "skip_task_if_not_found": true,
+      "log_skip": "btn_truck_icon not found — aborting instead of blind-tapping Other Trucks on the wrong screen"
     },
     {
       "action": "wait",

@@ -176,6 +176,34 @@
       "required": false
     },
     {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_collect_hero_blueprints.png",
+      "ignore_top_pct": 10,
+      "note": "Search for hero blueprints collect button"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_to_world_view_universal.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_to_hq_view_universal.png",
+      "required": false
+    },
+    {
       "action": "center_hq",
       "note": "Run tasks/center_hq.json to reset camera"
     }

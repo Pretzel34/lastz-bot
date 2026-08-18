@@ -10,8 +10,9 @@
     },
     {
       "action": "rally_count_check",
-      "max_rallies": 10,
-      "note": "Override normal daily rally limit for this event"
+      "counter_key": "fp_mod_vehicle",
+      "max_rallies": 30,
+      "note": "Dedicated daily rally budget for this FP event, own counter bucket AND own cap (2026-08-11) — no longer tied to rally.max_rallies_per_day, since that's the regular Rally task's setting and shouldn't limit this FP event at all. 30 matches the outer loop_task's max_iterations — should never actually be needed, just a safe fallback against runaway rallying."
     },
     {
       "action": "ensure_hq_view",
@@ -57,7 +58,7 @@
     {
       "action": "if_template_tap",
       "template": "btn_boomer.png",
-      "fallback_template": "btn_frostbane_boomer.png",
+      "fallback_templates": ["btn_frostbane_boomer.png", "btn_stegosaurus_boomer.png"],
       "skip_task_if_not_found": true,
       "log_skip": "Boomer search panel not found — wrong screen, cancelling"
     },
@@ -115,7 +116,9 @@
       ]
     },
     {
-      "action": "rally_count_record"
+      "action": "rally_count_record",
+      "counter_key": "fp_mod_vehicle",
+      "note": "Must match rally_count_check's counter_key above so both read/write the same bucket"
     },
     {
       "action": "wait",

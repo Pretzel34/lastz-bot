@@ -23,12 +23,14 @@
     {
       "action": "if_template_found",
       "template": "btn_research_in_progress_cancel.png",
-      "log_found": "Research in Progress — stopping task",
+      "log_found": "Research in progress/complete — cleaned up, continuing to research selection so something new gets queued",
+      "skip_to_on_found": 6,
       "on_found": [
         {
           "action": "if_template_tap",
           "template": "btn_complete_research.png",
           "required": false,
+          "set_flag": "research_was_completed",
           "note": "Research finished — claim the completed research if present"
         },
         {
@@ -50,6 +52,35 @@
           "template": "btn_research_in_progress_cancel.png",
           "required": false,
           "note": "Otherwise cancel the in-progress research and continue as usual"
+        },
+        {
+          "action": "wait",
+          "seconds": 3.0,
+          "if_flag": "research_was_completed"
+        },
+        {
+          "action": "ensure_hq_view",
+          "hq_btn": "btn_go_to_world_view.png",
+          "world_btn": "btn_go_to_hq_view.png",
+          "if_flag": "research_was_completed",
+          "note": "Claiming a completed research pops the view all the way back to HQ (not just up one panel level) — the tail below assumes the research icon needs a fresh tap, so confirm we're at HQ before reopening it"
+        },
+        {
+          "action": "wait",
+          "seconds": 2.0,
+          "if_flag": "research_was_completed"
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_research_icon.png",
+          "required": false,
+          "if_flag": "research_was_completed",
+          "note": "Reopen the research panel — claiming completion closed it entirely, so the tail below needs it freshly opened to select and start a new research"
+        },
+        {
+          "action": "wait",
+          "seconds": 4.0,
+          "if_flag": "research_was_completed"
         }
       ],
       "log_skip": "No research in progress — continuing to research selection"
@@ -108,10 +139,16 @@
       "seconds": 3.0
     },
     {
-      "action": "if_template_tap",
-      "template": "btn_press_back.png",
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
       "required": false,
-      "note": "Back out — research task complete"
+      "log_skip": "No back button found — could not back out to HQ view",
+      "note": "Back out — research task complete. Was a single unguarded btn_press_back.png attempt; that left the screen stuck on the research panel whenever it didn't match, which the very next task (Full Preparedness -> hero_progression) would silently inherit."
     }
   ]
 }

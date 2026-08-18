@@ -1,0 +1,371 @@
+{
+  "name": "fp_reward_collection",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "note": "Guarantee HQ view before entering the event center — mod_vehicle_rally.json/other FP tasks may leave the game in world view"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_event_center.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "scroll_left",
+      "steps": 1,
+      "distance_pct": 85,
+      "start_x_pct": 20.0,
+      "start_y_pct": 92.0,
+      "note": "FP icon is the furthest icon to the left in the tab bar — scroll left to reveal it"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_template",
+      "template": "btn_full_prepardness_icon_primary.png",
+      "fallback_templates": ["btn_full_prepardness_icon.png", "btn_full_prepardness_icon_secondary.png"],
+      "required": true,
+      "note": "Must find FP icon — error out if still not visible after scrolling left"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+
+    {
+      "action": "check_template_present",
+      "template": "btn_first_fp_chest_not_ready.png",
+      "set_flag": "fp_chest1_not_ready",
+      "note": "PHASE A, chest 1 of 3 — verify state before touching anything: not_ready/collected/ready are mutually exclusive, so this trio tells us exactly what to do next"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_first_fp_chest_collected.png",
+      "set_flag": "fp_chest1_already_collected"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_first_fp_chest_ready_to_collect.png",
+      "set_flag": "fp_chest1_ready",
+      "threshold": 0.95,
+      "note": "Ready art is a brighter version of the not_ready art, so the default 0.700 threshold lets it false-positive on a dim not_ready chest — raised threshold plus the if_not_flag cross-check below is the real guard"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_first_fp_chest_ready_to_collect.png",
+      "if_flag": "fp_chest1_ready",
+      "if_not_flag": "fp_chest1_not_ready",
+      "threshold": 0.95,
+      "required": false,
+      "note": "Only attempted when ready was found AND not_ready wasn't — the two templates can both cross threshold on the same screenshot (false positive), so requiring ready alone isn't trustworthy on its own"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_chest1_ready",
+      "if_not_flag": "fp_chest1_not_ready"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_fp_congradulations.png",
+      "if_flag": "fp_chest1_ready",
+      "if_not_flag": "fp_chest1_not_ready",
+      "required": false,
+      "set_flag": "fp_chest1_claimed"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_chest1_ready",
+      "if_not_flag": "fp_chest1_not_ready"
+    },
+
+    {
+      "action": "check_template_present",
+      "template": "btn_second_fp_chest_not_ready.png",
+      "set_flag": "fp_chest2_not_ready",
+      "note": "Chest 2 of 3"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_second_fp_chest_collected.png",
+      "set_flag": "fp_chest2_already_collected"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_second_fp_chest_ready_to_collect.png",
+      "set_flag": "fp_chest2_ready",
+      "threshold": 0.95
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_second_fp_chest_ready_to_collect.png",
+      "if_flag": "fp_chest2_ready",
+      "if_not_flag": "fp_chest2_not_ready",
+      "threshold": 0.95,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_chest2_ready",
+      "if_not_flag": "fp_chest2_not_ready"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_fp_congradulations.png",
+      "if_flag": "fp_chest2_ready",
+      "if_not_flag": "fp_chest2_not_ready",
+      "required": false,
+      "set_flag": "fp_chest2_claimed"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_chest2_ready",
+      "if_not_flag": "fp_chest2_not_ready"
+    },
+
+    {
+      "action": "check_template_present",
+      "template": "btn_third_fp_chest_not_ready.png",
+      "set_flag": "fp_chest3_not_ready",
+      "note": "Chest 3 of 3"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_thrid_fp_chest_collected.png",
+      "set_flag": "fp_chest3_already_collected"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_third_fp_chest_ready_to_collect.png",
+      "set_flag": "fp_chest3_ready",
+      "threshold": 0.95
+    },
+    {
+      "action": "loop_until_template",
+      "if_flag": "fp_chest3_ready",
+      "if_not_flag": "fp_chest3_not_ready",
+      "any_of": ["btn_fp_congradulations.png"],
+      "max_iterations": 3,
+      "on_each": [
+        {
+          "action": "if_template_tap",
+          "template": "btn_third_fp_chest_ready_to_collect.png",
+          "threshold": 0.95,
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 4.0
+        }
+      ],
+      "note": "Chest 3 can take a beat to register as claimable — retry the tap instead of giving up after one miss, same pattern hero_progression.json uses. Only enters the loop when ready was found AND not_ready wasn't."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_chest3_ready",
+      "if_not_flag": "fp_chest3_not_ready"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_fp_congradulations.png",
+      "if_flag": "fp_chest3_ready",
+      "if_not_flag": "fp_chest3_not_ready",
+      "required": false,
+      "set_flag": "fp_chest3_claimed"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_chest3_ready",
+      "if_not_flag": "fp_chest3_not_ready"
+    },
+
+    {
+      "action": "check_template_present",
+      "template": "btn_first_fp_chest_collected.png",
+      "set_flag": "fp_chest1_done",
+      "note": "Post-attempt re-verification — confirms true end state after any claims just made above, independent of the pre-check flags. If fp_chest3_done is true, all 3 numbered chests are truly finished (they unlock sequentially, so chest 3 collected implies 1 and 2 are too) and this FP task's numbered-chest work is complete for now; otherwise at least one chest is still waiting on its timer and this task should be run again later."
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_second_fp_chest_collected.png",
+      "set_flag": "fp_chest2_done"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_thrid_fp_chest_collected.png",
+      "set_flag": "fp_chest3_done"
+    },
+
+    {
+      "action": "check_template_present",
+      "template": "btn_daily_medal_not_ready_first.png",
+      "set_flag": "fp_medal1_not_ready",
+      "threshold": 0.85,
+      "note": "PHASE B, daily medal 1 of 3 — always checked after the numbered chests, and never used to decide whether to run another FP round: medals refill on a 24hr timer, not FP progress, so an unready medal is not a reason to keep progressing FP. Threshold raised from default: confirmed live 2026-08-12, true not_ready scores 0.958-0.962 but a true ready state can score 0.757-0.782 on this same template, so 0.85 sits in the gap."
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_daily_medal_collected_first.png",
+      "set_flag": "fp_medal1_already_collected"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_daily_medal_ready_to_collect_first.png",
+      "set_flag": "fp_medal1_ready",
+      "threshold": 0.85,
+      "note": "Lowered from 0.95: confirmed live 2026-08-12, true ready scores only 0.862-0.912 against a genuinely not-ready-scoring 0.756-0.785, so 0.95 was filtering out real collectibles. 0.85 sits in the gap between those two ranges."
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_daily_medal_ready_to_collect_first.png",
+      "if_flag": "fp_medal1_ready",
+      "if_not_flag": "fp_medal1_not_ready",
+      "threshold": 0.85,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_medal1_ready",
+      "if_not_flag": "fp_medal1_not_ready"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_fp_congradulations.png",
+      "if_flag": "fp_medal1_ready",
+      "if_not_flag": "fp_medal1_not_ready",
+      "required": false,
+      "set_flag": "fp_medal1_claimed"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_medal1_ready",
+      "if_not_flag": "fp_medal1_not_ready"
+    },
+
+    {
+      "action": "check_template_present",
+      "template": "btn_daily_medal_not_ready_second.png",
+      "set_flag": "fp_medal2_not_ready",
+      "threshold": 0.85,
+      "note": "Daily medal 2 of 3"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_daily_medal_collected_second.png",
+      "set_flag": "fp_medal2_already_collected"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_daily_medal_ready_to_collect_second.png",
+      "set_flag": "fp_medal2_ready",
+      "threshold": 0.85
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_daily_medal_ready_to_collect_second.png",
+      "if_flag": "fp_medal2_ready",
+      "if_not_flag": "fp_medal2_not_ready",
+      "threshold": 0.85,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_medal2_ready",
+      "if_not_flag": "fp_medal2_not_ready"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_fp_congradulations.png",
+      "if_flag": "fp_medal2_ready",
+      "if_not_flag": "fp_medal2_not_ready",
+      "required": false,
+      "set_flag": "fp_medal2_claimed"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_medal2_ready",
+      "if_not_flag": "fp_medal2_not_ready"
+    },
+
+    {
+      "action": "check_template_present",
+      "template": "btn_daily_medal_not_ready_third.png",
+      "set_flag": "fp_medal3_not_ready",
+      "threshold": 0.85,
+      "note": "Daily medal 3 of 3"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_daily_medal_collected_thrid.png",
+      "set_flag": "fp_medal3_already_collected"
+    },
+    {
+      "action": "check_template_present",
+      "template": "btn_daily_medal_ready_to_collect_third.png",
+      "set_flag": "fp_medal3_ready",
+      "threshold": 0.85
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_daily_medal_ready_to_collect_third.png",
+      "if_flag": "fp_medal3_ready",
+      "if_not_flag": "fp_medal3_not_ready",
+      "threshold": 0.85,
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_medal3_ready",
+      "if_not_flag": "fp_medal3_not_ready"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_fp_congradulations.png",
+      "if_flag": "fp_medal3_ready",
+      "if_not_flag": "fp_medal3_not_ready",
+      "required": false,
+      "set_flag": "fp_medal3_claimed"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "fp_medal3_ready",
+      "if_not_flag": "fp_medal3_not_ready"
+    },
+
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "required": false,
+      "log_skip": "No back button found — could not back out of the FP event view",
+      "note": "Back out to HQ after checking/claiming everything above — otherwise the game is left sitting on the FP/event-center screen. Safe to add here even for callers that run this task twice in a row since this task always re-enters from ensure_hq_view at the top."
+    }
+  ]
+}

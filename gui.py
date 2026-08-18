@@ -26,6 +26,7 @@ from PIL import Image, ImageTk
 import customtkinter as ctk
 
 import version
+from anomaly_watcher import AnomalyWatcher
 from paths import ensure_app_dir, get_farms_path, get_resource_dir, get_app_dir
 from updater import check_for_update, download_and_launch
 from emulator_config import (
@@ -109,6 +110,14 @@ ALLIANCE_MINING_TASKS = [
     ("gather_alliance_building", "Gather Alliance Building", "gather_alliance_building"),
 ]
 
+# Upgrade Buildings task JSON files — (setting_key, label, json_filename)
+# "upgrade_hq" has no JSON wired up yet — left out of this list on purpose so
+# the builder doesn't try to load a task file for it, but the toggle still
+# exists in settings for when it's built.
+UPGRADE_BUILDING_TASKS = [
+    ("start_upgrade_on_buildings", "Start Upgrade on Buildings", "start_build"),
+]
+
 BOUNTY_TASKS = [
     ("enable_gold_bounty",   "Enable Gold Mission",   "enable_gold_bounty"),
     ("enable_purple_bounty", "Enable Purple Mission", "enable_purple_bounty"),
@@ -163,6 +172,14 @@ TASK_CATEGORIES = [
         ]
     },
     {
+        "key":   "furylord",
+        "label": "Furylord",
+        "icon":  "👹",
+        "settings": [
+            {"key": "enabled", "label": "Enable Furylord", "type": "toggle", "default": True},
+        ]
+    },
+    {
         "key":   "gathering",
         "label": "Gathering",
         "icon":  "🪵",
@@ -201,12 +218,35 @@ TASK_CATEGORIES = [
         ]
     },
     {
+        "key":   "full_preparedness",
+        "label": "Full Preparedness",
+        "icon":  "🎖️",
+        "settings": [
+            {"key": "enabled",           "label": "Enable Full Preparedness", "type": "toggle", "default": True},
+            {"key": "hero_progression",  "label": "Hero Progression",         "type": "toggle", "default": True},
+            {"key": "army_expansion",    "label": "Army Expansion",           "type": "toggle", "default": True},
+            {"key": "age_of_science",    "label": "Age of Science",           "type": "toggle", "default": True},
+            {"key": "mod_vehicle",       "label": "Mod Vehicle Boost",        "type": "toggle", "default": True},
+            {"key": "shelter_upgrade",   "label": "Shelter Upgrade",          "type": "toggle", "default": True},
+        ]
+    },
+    {
         "key":   "alliance_mining",
         "label": "Alliance Mining",
         "icon":  "⛏️",
         "settings": [
             {"key": "enabled",                   "label": "Enable Alliance Mining",   "type": "toggle", "default": True},
             {"key": "gather_alliance_building",  "label": "Gather Alliance Building", "type": "toggle", "default": True},
+        ]
+    },
+    {
+        "key":   "upgrade_buildings",
+        "label": "Upgrade Buildings",
+        "icon":  "🏗️",
+        "settings": [
+            {"key": "enabled",                      "label": "Enable Upgrade Buildings",     "type": "toggle", "default": False},
+            {"key": "start_upgrade_on_buildings",    "label": "Start Upgrade on Buildings",   "type": "toggle", "default": True},
+            {"key": "upgrade_hq",                    "label": "Upgrade HQ",                   "type": "toggle", "default": False},
         ]
     },
     {
@@ -248,6 +288,23 @@ TASK_CATEGORIES = [
             {"key": "buy_from_alliance_store", "label": "Buy Shield from Alliance Store", "type": "toggle", "default": False},
             {"key": "buy_using_diamonds",      "label": "Buy Shield using Diamonds",      "type": "toggle", "default": False},
             {"key": "pre_buster_shield",       "label": "Apply Shield Before Enemy Buster", "type": "toggle", "default": False},
+        ]
+    },
+    {
+        "key":   "train_troops",
+        "label": "Train Troops",
+        "icon":  "🎯",
+        "settings": [
+            {"key": "enabled",           "label": "Enable Training Tab",     "type": "toggle", "default": True},
+            {"key": "enable_assaulter",  "label": "Enable Assaulter Training", "type": "toggle", "default": True},
+            {"key": "assaulter_level",   "label": "Assaulter Level",         "type": "select", "default": "Promote Troops",
+             "options": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "Promote Troops", "Highest Tier"]},
+            {"key": "enable_rider",      "label": "Enable Rider Training",   "type": "toggle", "default": True},
+            {"key": "rider_level",       "label": "Rider Level",             "type": "select", "default": "Promote Troops",
+             "options": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "Promote Troops", "Highest Tier"]},
+            {"key": "enable_shooter",    "label": "Enable Shooter Training", "type": "toggle", "default": True},
+            {"key": "shooter_level",     "label": "Shooter Level",           "type": "select", "default": "Promote Troops",
+             "options": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "Promote Troops", "Highest Tier"]},
         ]
     },
 ]
@@ -303,8 +360,14 @@ class BotApp(ctk.CTk):
         self._farm_widget_refs: dict = {}
         self._clipboard_farm = None
         self._record_runs = False
+        self._anomaly_watcher = AnomalyWatcher()  # fed every log line as it's displayed
+        self._anomaly_targets: dict = {}          # anomaly-row tag -> log_box index to jump to
         self._arrange_lock = threading.Lock()
         self._halted = threading.Event()  # set by Stop All; prevents queued farm threads from starting
+        self._pre_buster_active = threading.Event()  # set while a pre-buster shield round is in
+        # progress; makes already-queued normal-rotation farm threads bail out (like _halted) so
+        # they can't win the semaphore race against the shield-only round and jump the queue —
+        # they just re-run fresh next cycle, same as the interrupted busy farm does.
         self._farm_semaphore: threading.Semaphore | None = None  # shared across all _start_all calls
 
         # Timer state
@@ -480,17 +543,19 @@ class BotApp(ctk.CTk):
         )
         self._run_btn.pack(side="left", padx=4)
 
-        # HIDDEN: "Record Runs" button — kept for future debugging use
-        # Divider before it also commented out; restore both when re-enabling
-        # ctk.CTkFrame(ctrl, width=1, fg_color=C["border"]).pack(
-        #     side="left", fill="y", padx=8, pady=4)
-        # self.rec_toggle_btn = ctk.CTkButton(
-        #     ctrl, text="⏺ Record Runs", command=self._toggle_record_runs,
-        #     font=("Segoe UI Semibold", 10), height=28, corner_radius=4,
-        #     fg_color=C["panel2"], hover_color=C["border"],
-        #     text_color=C["text"], width=110,
-        # )
-        # self.rec_toggle_btn.pack(side="left", padx=4)
+        # "Record Runs" — captures annotated before/after screenshots per
+        # action (via ScreenRecorder) and auto-generates a self-contained
+        # HTML verification report when the run finishes. Opt-in: leave off
+        # for normal farming so there's zero added overhead day-to-day.
+        ctk.CTkFrame(ctrl, width=1, fg_color=C["border"]).pack(
+            side="left", fill="y", padx=8, pady=4)
+        self.rec_toggle_btn = ctk.CTkButton(
+            ctrl, text="⏺ Record Runs", command=self._toggle_record_runs,
+            font=("Segoe UI Semibold", 10), height=28, corner_radius=4,
+            fg_color=C["panel2"], hover_color=C["border"],
+            text_color=C["text"], width=110,
+        )
+        self.rec_toggle_btn.pack(side="left", padx=4)
 
         # ── Timer + Status row ─────────────────────────────────────────────
         stats_row = ctk.CTkFrame(pg, fg_color="transparent")
@@ -549,6 +614,44 @@ class BotApp(ctk.CTk):
         self._status_next_lbl = ctk.CTkLabel(status_inner, text="Next Cycle: —",
                                               font=FB, text_color=C["text2"])
         self._status_next_lbl.pack(anchor="w")
+
+        # --- TEMPORARY: pre-buster shield window test trigger — remove this
+        # block (and test_pre_buster_shield()) once the 10-min window has
+        # been validated and doesn't need manual testing anymore. ---
+        self._btn(status_inner, "🧪 Test Pre-Buster Shield", self.test_pre_buster_shield,
+                  small=True).pack(anchor="w", pady=(6, 0))
+
+        # ── Anomalies (real-time bug flagging, fed from every log line) ─────
+        anomaly_card = ctk.CTkFrame(pg, fg_color=C["panel"], corner_radius=8,
+                                     border_width=1, border_color=C["border"])
+        anomaly_card.pack(fill="x", padx=16, pady=(8, 0))
+
+        anomaly_hdr = ctk.CTkFrame(anomaly_card, fg_color="transparent", height=32)
+        anomaly_hdr.pack(fill="x", padx=14, pady=(8, 0))
+        anomaly_hdr.pack_propagate(False)
+        ctk.CTkLabel(anomaly_hdr, text="⚑  Anomalies", font=FT2,
+                     text_color=C["accent"]).pack(side="left")
+        self._btn(anomaly_hdr, "🗑 Clear", self._clear_anomalies, small=True).pack(side="right")
+
+        anomaly_bg = ctk.CTkFrame(anomaly_card, fg_color=C["panel2"], corner_radius=6)
+        anomaly_bg.pack(fill="x", padx=14, pady=(6, 10))
+
+        self.anomaly_box = tk.Text(
+            anomaly_bg, font=FSM, bg=C["panel2"], fg=C["text3"],
+            relief="flat", bd=0, wrap="none", height=4,
+            state="disabled", padx=8, pady=6, cursor="hand2",
+        )
+        anomaly_sb = tk.Scrollbar(anomaly_bg, command=self.anomaly_box.yview,
+                                   bg=C["panel2"], troughcolor=C["panel2"],
+                                   relief="flat", bd=0)
+        anomaly_sb.pack(side="right", fill="y")
+        self.anomaly_box.configure(yscrollcommand=anomaly_sb.set)
+        self.anomaly_box.pack(fill="x", padx=2, pady=2)
+        self.anomaly_box.tag_config("high",   foreground=C["red"])
+        self.anomaly_box.tag_config("medium", foreground=C["yellow"])
+        self.anomaly_box.tag_config("low",    foreground=C["text3"])
+        self.anomaly_box.insert("end", "No anomalies yet — flags likely bugs the instant they're logged.\n", "low")
+        self.anomaly_box.configure(state="disabled")
 
         # ── Activity Log (main focus, full width) ──────────────────────────
         log_card = ctk.CTkFrame(pg, fg_color=C["panel"], corner_radius=8,
@@ -1407,7 +1510,7 @@ class BotApp(ctk.CTk):
 
     # Session Overview table columns (kept in one place so header + rows align).
     _STATS_COLUMNS = ["Farm", "Emu ID", "Status", "Runtime", "Actions",
-                      "Success %", "Tasks", "Shielded", "Server Time", "Local Time"]
+                      "Success %", "Tasks", "Shielded", "FP Chests", "Server Time", "Local Time"]
     _STATS_COL_W = 120
 
     def _build_page_farm_stats(self):
@@ -1465,6 +1568,29 @@ class BotApp(ctk.CTk):
             pass
         return "✗"
 
+    _FP_EVENT_LABELS = {
+        "hero_progression": "Hero Progression",
+        "army_expansion":   "Army Expansion",
+        "age_of_science":   "Age of Science",
+        "mod_vehicle":      "Mod Vehicle",
+        "shelter_upgrade":  "Shelter Upgrade",
+    }
+
+    def _fp_chest_status(self, farm, fp_chest_progress):
+        """Most recently updated FP event's chest progress for this farm, e.g. 'Age of Science 2/3'."""
+        from datetime import datetime as _dt
+        port = str(farm.get("port", ""))
+        best = None
+        for entry in fp_chest_progress.values():
+            if str(entry.get("port", "")) != port:
+                continue
+            if best is None or entry.get("updated_at", "") > best.get("updated_at", ""):
+                best = entry
+        if not best:
+            return "—"
+        label = self._FP_EVENT_LABELS.get(best.get("event", ""), best.get("event", "?"))
+        return f"{label} {best.get('claimed', 0)}/{best.get('total', 0)}"
+
     def _refresh_stats_table(self):
         import json as _json
         from pathlib import Path as _Path
@@ -1477,6 +1603,11 @@ class BotApp(ctk.CTk):
         shield_state = {}
         try:
             shield_state = _json.loads(_Path("logs/shield_state.json").read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        fp_chest_progress = {}
+        try:
+            fp_chest_progress = _json.loads(_Path("logs/fp_chest_progress.json").read_text(encoding="utf-8"))
         except Exception:
             pass
         for farm in self.farms:
@@ -1493,6 +1624,7 @@ class BotApp(ctk.CTk):
                 f"{engine.stats.success_rate:.0f}%" if engine else "—",
                 str(engine.stats.tasks_completed) if engine else "—",
                 self._shielded_status(farm, shield_state),
+                self._fp_chest_status(farm, fp_chest_progress),
                 server_t,
                 local_t,
             ]
@@ -1775,12 +1907,17 @@ class BotApp(ctk.CTk):
         self.after(0, lambda count=n, et=emu_type: self._log(
             f"  📐 Arranged {count} {et} window(s) left-to-right, bot GUI to the right", "info"))
 
-    def _start_farm(self, farm: dict, _semaphore=None, shield_only=False):
+    def _start_farm(self, farm: dict, _semaphore=None, shield_only=False, test_mode=False):
         """
         Launch emulator, open Last Z, then start tasks — all in one click.
 
         shield_only=True is the pre-buster window pass: pre-steps are limited
         to the update check + startup dismiss, only the Shield task runs,
+        test_mode=True (only meaningful alongside shield_only) marks the
+        executor so skip_unless_enemy_buster_day treats it as the real
+        pre-buster window regardless of actual server day/time — otherwise a
+        manually-triggered test never gets past that gate outside the real
+        10-minute window.
         maintenance is skipped, and completion resumes the paused cycle
         countdown instead of resetting it.
         """
@@ -1818,6 +1955,16 @@ class BotApp(ctk.CTk):
                 # If Stop All was clicked while this farm was queued, bail out immediately
                 if self._halted.is_set():
                     self.after(0, lambda: self._log(f"■ {name}: skipped — bot halted", "warn"))
+                    return
+
+                # A pre-buster shield round is in progress and this is a normal (non-shield)
+                # launch that was already queued before the round started — it just won the
+                # semaphore race against the shield-only round-robin. Back out immediately so
+                # the shield round gets exclusive use of the one concurrency slot; this farm
+                # re-runs fresh once the round finishes and the next cycle picks it up.
+                if not shield_only and self._pre_buster_active.is_set():
+                    self.after(0, lambda: self._log(
+                        f"■ {name}: skipped — pre-buster shield round in progress, will run next cycle", "warn"))
                     return
 
                 def launch_log(msg, level="info"):
@@ -1876,6 +2023,7 @@ class BotApp(ctk.CTk):
                     emulator_type=emu_type,
                     stop_event=engine._stop_event,
                 )
+                executor.pre_buster_test_mode = test_mode
                 engine.executor = executor
 
                 # ADB resolution check — warn if not 540x960
@@ -1896,6 +2044,7 @@ class BotApp(ctk.CTk):
                     pass
 
                 # Recording
+                rec_name = None
                 if self._record_runs:
                     from datetime import datetime as _datetime
                     rec_name = f"{name}_{_datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -2108,6 +2257,12 @@ class BotApp(ctk.CTk):
                         self.after(0, lambda: self._log(
                             f"  ✗ {name}: emulator relaunch failed", "error"))
                         return False
+                    post_wait = int(float(self.bot_settings.get("post_launch_wait", 5)))
+                    if post_wait > 0:
+                        self.after(0, lambda s=post_wait: self._log(
+                            f"  ⏱ Post-launch wait {s}s for game to settle...", "info"))
+                        import time as _time
+                        _time.sleep(post_wait)
                     new_bot = launcher.get_bot(idx)
                     if not new_bot:
                         return False
@@ -2168,10 +2323,28 @@ class BotApp(ctk.CTk):
                             self.after(0, lambda: self._log(
                                 f"  ✗ {name}: engine thread still alive after kill — abandoning", "error"))
 
+                # Recording: stop capture and build the verification report
+                if rec_name:
+                    engine.disable_recording()
+                    try:
+                        from recording_utils import RECORDINGS_DIR, generate_report
+                        run_dir = RECORDINGS_DIR / "run" / rec_name
+                        log_path = Path(f"logs/gui_{datetime.now():%Y%m%d}.log")
+                        report_path = generate_report(run_dir, log_path)
+                        self.after(0, lambda p=report_path: self._log(
+                            f"  ⚑ Verification report → {p}", "success"))
+                    except Exception as _rep_e:
+                        self.after(0, lambda err=_rep_e: self._log(
+                            f"  ⚠ {name}: report generation failed: {err}", "warn"))
+
                 # Record cycle completion time (used for "Next Cycle" countdown).
                 # Shield-only passes must not reset the countdown — the paused
                 # countdown resumes via _on_shield_only_complete in the finally.
-                if not shield_only:
+                # A farm force-stopped mid-cycle to make room for the pre-buster
+                # shield round (_pre_buster_interrupted) must not reset it either
+                # — that farm is about to get its own shield-only turn below, and
+                # the countdown should only resume once the whole round is done.
+                if not shield_only and not getattr(engine, "_pre_buster_interrupted", False):
                     self.after(0, self._on_farm_cycle_complete)
 
                 # Maintenance: ADB cleanup while emulator is still running
@@ -2349,19 +2522,39 @@ class BotApp(ctk.CTk):
             return f"{est.year}-{est.month}-{est.day}"
         return None
 
-    def _maybe_start_pre_buster_run(self):
-        """Fire the shield-only pass if the pre-buster window is open. Tk main thread only."""
+    def _maybe_start_pre_buster_run(self, test_key: str = None):
+        """
+        Fire the shield-only pass if the pre-buster window is open.
+
+        test_key: when given, bypasses the real server-time/day gate and the
+        dedup check entirely (used by the manual test trigger to simulate the
+        window on demand, regardless of what stage any farm is currently in).
+        The dedup state file is deliberately NOT written in this case, so a
+        test run can never suppress the real window later — and the real
+        trigger's "already covered past rollover" check below always uses
+        real wall-clock timestamps regardless of what produced the current
+        shield_state.json entry, so it still correctly re-fires for real if
+        a test shield has already expired by then.
+
+        Tk main thread only.
+        """
         import json as _json
         from datetime import datetime as _dt, timedelta as _td
 
-        if not BOT_AVAILABLE or self._cycle_complete_time is None:
+        if not BOT_AVAILABLE:
             return
-        key = self._pre_buster_window()
-        if not key or key == self._pre_buster_done_key:
-            return
-        if any(getattr(e, "_thread", None) and e._thread.is_alive()
-               for e in self.engines.values()):
-            return
+        is_test = test_key is not None
+        if is_test:
+            key = test_key
+        else:
+            # No _cycle_complete_time (i.e. idle-between-cycles) gate here —
+            # busy farms are handled below (_stop_busy_farm_for_shield), not
+            # excluded. A gate here previously made that logic unreachable
+            # from the real trigger, since farms are almost always mid-cycle
+            # at 23:50 server time. Confirmed missed live 2026-08-07.
+            key = self._pre_buster_window()
+            if not key or key == self._pre_buster_done_key:
+                return
 
         toggled = [
             f for f in self.farms
@@ -2370,6 +2563,8 @@ class BotApp(ctk.CTk):
             and f.get("tasks", {}).get("shield", {}).get("pre_buster_shield", False)
         ]
         if not toggled:
+            if is_test:
+                self._log("🧪 Pre-buster test: no farms have 'Apply Shield Before Enemy Buster' enabled — nothing to test", "warn")
             return
 
         # Local wall-clock moment of the upcoming server midnight, to skip
@@ -2398,29 +2593,103 @@ class BotApp(ctk.CTk):
             farms.append(farm)
 
         # Pause the countdown and disarm auto-restart BEFORE launching, so a
-        # min-cycle expiry can't fire a full cycle mid-shield-run.
-        self._pre_buster_paused_elapsed = datetime.now() - self._cycle_complete_time
-        self._cycle_complete_time = None
-        self._pre_buster_done_key = key
-        self._save_pre_buster_state(key)
+        # min-cycle expiry can't fire a full cycle mid-shield-run. Only
+        # meaningful if a countdown is actually running — the real trigger
+        # always guarantees this (checked above), but a test run can fire
+        # while every farm is still mid-cycle, before any countdown exists.
+        if self._cycle_complete_time is not None:
+            self._pre_buster_paused_elapsed = datetime.now() - self._cycle_complete_time
+            self._cycle_complete_time = None
+        if is_test:
+            self._log(f"🧪 TEST: simulating pre-buster window (key={key}) — dedup state NOT persisted", "accent")
+        else:
+            self._pre_buster_done_key = key
+            self._save_pre_buster_state(key)
 
         if not farms:
             self._log("🛡 Pre-buster window open — every eligible farm is already shielded past the rollover", "info")
             self._resume_cycle_countdown()
             return
 
-        self._log(f"🛡 Pre-buster window open — pausing cycle countdown and running "
-                  f"a shield-only pass for {len(farms)} farm(s)...", "accent")
-        self._pre_buster_pending = len(farms)
-        self._start_shield_only_run(farms)
+        # Claim exclusive use of the one concurrency slot for the whole round —
+        # any normal-rotation farm thread already queued from before the round
+        # started (blocked on the same semaphore) will back out the instant it
+        # sees this set, instead of winning the race and jumping the queue.
+        self._pre_buster_active.set()
 
-    def _start_shield_only_run(self, farms):
+        # Farms with a live thread are mid-cycle on a regular task. No farm
+        # gets left out of the shield round: pause, let the in-flight action
+        # finish, then fully stop the engine so its emulator closes and its
+        # concurrency slot frees up. It's then folded into the exact same
+        # shield-only round-robin as every idle farm below — no bookmark, no
+        # special resume; it just re-enters the normal rotation fresh next
+        # cycle, same as any farm would after finishing.
+        busy_pairs = []
+        for farm in farms:
+            engine = self.engines.get(farm["emu_index"])
+            if engine and getattr(engine, "_thread", None) and engine._thread.is_alive():
+                busy_pairs.append((farm, engine))
+        for farm, engine in busy_pairs:
+            self._stop_busy_farm_for_shield(farm, engine)
+
+        self._log(f"🛡 Pre-buster window open — pausing cycle countdown and running "
+                  f"a shield-only pass for {len(farms)} farm(s) "
+                  f"({len(busy_pairs)} stopped mid-cycle to make room) — no farm left behind...", "accent")
+        self._pre_buster_pending = len(farms)
+        self._start_shield_only_run(farms, test_mode=is_test)
+
+    # --- TEMPORARY: manual trigger for testing the pre-buster shield window
+    # on demand, without waiting for the real day/time. Remove this method
+    # and its button (search "TEST: pre-buster") once validated. ---
+    def test_pre_buster_shield(self):
+        """
+        Manually fire the pre-buster shield-only pass right now, for testing.
+        Bypasses the real server-time/day gate and dedup state entirely (see
+        _maybe_start_pre_buster_run's test_key docs) — safe to run repeatedly,
+        each call uses a fresh unique key so it never collides with itself
+        or with the real dedup state.
+        """
+        test_key = f"TEST-{datetime.now():%Y%m%d_%H%M%S}"
+        self._log(f"🧪 Manually triggering pre-buster shield test (key={test_key})...", "accent")
+        self._maybe_start_pre_buster_run(test_key=test_key)
+
+    def _start_shield_only_run(self, farms, test_mode=False):
         """Launch the shield-only pass for the given farms (semaphore-serialized)."""
         if self._farm_semaphore is None:
             self._farm_semaphore = threading.Semaphore(
                 int(self.bot_settings.get("max_concurrent_sessions", 1)))
         for farm in farms:
-            self._start_farm(farm, _semaphore=self._farm_semaphore, shield_only=True)
+            self._start_farm(farm, _semaphore=self._farm_semaphore, shield_only=True, test_mode=test_mode)
+
+    def _stop_busy_farm_for_shield(self, farm, engine):
+        """
+        Cleanly interrupt a mid-cycle farm so it can take its turn in the
+        pre-buster shield round-robin: pause (lets the in-flight action
+        finish naturally), then stop — engine._run_loop exits, and _start_farm's
+        own do() thread runs its normal shutdown (report, cycle-complete,
+        maintenance, close emulator, release its concurrency slot) exactly as
+        it would for any farm finishing normally. No progress is bookmarked;
+        the farm just re-enters the normal rotation fresh next cycle.
+
+        engine._pre_buster_interrupted is set so that same do() thread's
+        normal "record cycle complete" step (gui.py ~2318) skips itself —
+        this farm is about to get its own shield-only turn below, and letting
+        the stray original run re-arm the Next Cycle countdown could fire
+        _start_all() (a full normal rotation) mid-round, before every farm
+        has had its shield pass.
+        """
+        import time as _time
+
+        def _do():
+            name = farm.get("name", "?")
+            self.after(0, lambda: self._log(
+                f"  🛡 {name}: mid-cycle — pausing, then stopping to free its slot for the shield round", "accent"))
+            engine.pause()
+            _time.sleep(8)  # let whatever action was already in flight finish naturally
+            engine._pre_buster_interrupted = True
+            engine.stop()
+
+        threading.Thread(target=_do, daemon=True).start()
 
     def _on_shield_only_complete(self):
         """Per-farm completion of the shield-only pass; resumes the countdown after the last one."""
@@ -2430,6 +2699,7 @@ class BotApp(ctk.CTk):
 
     def _resume_cycle_countdown(self):
         """Restore the Next Cycle countdown that was paused for the pre-buster pass."""
+        self._pre_buster_active.clear()  # release the gate — queued/next-cycle farms can run again
         if self._pre_buster_paused_elapsed is not None:
             self._cycle_complete_time = datetime.now() - self._pre_buster_paused_elapsed
             self._pre_buster_paused_elapsed = None
@@ -2437,8 +2707,13 @@ class BotApp(ctk.CTk):
         self._update_status_display()
 
     def _toggle_record_runs(self):
-        # Button is hidden — method kept for future re-enabling
         self._record_runs = not self._record_runs
+        if hasattr(self, "rec_toggle_btn"):
+            self.rec_toggle_btn.configure(
+                text="⏺ Recording ON" if self._record_runs else "⏺ Record Runs",
+                fg_color=C["accent"] if self._record_runs else C["panel2"],
+                text_color=C["bg"] if self._record_runs else C["text"],
+            )
         self._log(f"Run recording {'ON' if self._record_runs else 'OFF'}.", "info")
 
     # ── Keep Running flag ─────────────────────────────────────────────────
@@ -2527,6 +2802,22 @@ class BotApp(ctk.CTk):
             if not rally_cfg.get("enabled", True):
                 self._log("  Rally disabled — skipping all rally tasks", "warn")
                 return
+
+            def _rallies_done_today() -> int:
+                from datetime import date
+                counts_path = Path("logs/rally_counts.json")
+                if not counts_path.exists():
+                    return 0
+                try:
+                    with open(counts_path, encoding="utf-8") as f:
+                        counts = _json.load(f)
+                except Exception:
+                    return 0
+                est = estimate_server_datetime()
+                today = f"{est.year}-{est.month}-{est.day}" if est else str(date.today())
+                key = f"{farm.get('port', 0)}_{today}"
+                return int(counts.get(key, 0))
+
             for key, label, json_key in RALLY_TASKS:
                 if not rally_cfg.get(key, True):
                     self._log(f"  ⏭ Skipping {label} (disabled)", "info")
@@ -2537,14 +2828,41 @@ class BotApp(ctk.CTk):
                         with open(json_file, encoding="utf-8") as f:
                             data = _json.load(f)
                         actions = data.get("actions", data) if isinstance(data, dict) else data
-                        repeat = int(rally_cfg.get("max_rallies_per_day", 1)) if key == "create_rally" else 1
-                        for i in range(repeat):
-                            tasks.append({"name": f"{label} ({i + 1}/{repeat})", "actions": actions})
-                        self._log(f"  ✓ {label} — {len(actions)} actions x{repeat}", "info")
+                        if key == "create_rally":
+                            max_rallies = int(rally_cfg.get("max_rallies_per_day", 1))
+                            done        = _rallies_done_today()
+                            repeat      = max(0, max_rallies - done)
+                            if repeat == 0:
+                                self._log(f"  ⏭ Skipping {label} — daily limit already reached ({done}/{max_rallies})", "info")
+                                continue
+                            for i in range(repeat):
+                                tasks.append({"name": f"{label} ({done + i + 1}/{max_rallies})", "actions": actions})
+                            self._log(f"  ✓ {label} — {len(actions)} actions x{repeat} (already done today: {done}/{max_rallies})", "info")
+                        else:
+                            tasks.append({"name": f"{label} (1/1)", "actions": actions})
+                            self._log(f"  ✓ {label} — {len(actions)} actions x1", "info")
                     except Exception as e:
                         self._log(f"  ✗ Failed to load {json_file.name}: {e}", "error")
                 else:
                     self._log(f"  ⚠ {label} — tasks/{json_key}.json not found, skipping", "warn")
+
+        def _add_furylord():
+            furylord_cfg = farm_tasks.get("furylord", {})
+            if not furylord_cfg.get("enabled", True):
+                self._log("  Furylord disabled — skipping", "warn")
+                return
+            json_file = tasks_dir / "Furylord.json"
+            if json_file.exists():
+                try:
+                    with open(json_file, encoding="utf-8") as f:
+                        data = _json.load(f)
+                    actions = data.get("actions", data) if isinstance(data, dict) else data
+                    tasks.append({"name": "Furylord", "actions": actions})
+                    self._log(f"  ✓ Furylord — {len(actions)} actions", "info")
+                except Exception as e:
+                    self._log(f"  ✗ Failed to load Furylord.json: {e}", "error")
+            else:
+                self._log("  ⚠ Furylord — tasks/Furylord.json not found, skipping", "warn")
 
         def _add_gathering():
             gather_cfg = farm_tasks.get("gathering", {})
@@ -2624,6 +2942,25 @@ class BotApp(ctk.CTk):
                 else:
                     self._log(f"  ⚠ {label} — tasks/{json_key}.json not found, skipping", "warn")
 
+        def _add_full_preparedness():
+            fp_cfg = farm_tasks.get("full_preparedness", {})
+            if not fp_cfg.get("enabled", True):
+                self._log("  Full Preparedness disabled — skipping", "warn")
+                return
+            json_file = tasks_dir / "full_preparedness.json"
+            if json_file.exists():
+                try:
+                    with open(json_file, encoding="utf-8") as f:
+                        data = _json.load(f)
+                    actions = data.get("actions", data) if isinstance(data, dict) else data
+                    tasks.append({"name": "Full Preparedness", "actions": actions,
+                                  "farm_settings": {"full_preparedness": fp_cfg}})
+                    self._log(f"  ✓ Full Preparedness — {len(actions)} actions", "info")
+                except Exception as e:
+                    self._log(f"  ✗ Failed to load full_preparedness.json: {e}", "error")
+            else:
+                self._log("  ⚠ Full Preparedness — tasks/full_preparedness.json not found, skipping", "warn")
+
         def _add_alliance_mining():
             alliance_mining_cfg = farm_tasks.get("alliance_mining", {})
             if not alliance_mining_cfg.get("enabled", True):
@@ -2640,6 +2977,33 @@ class BotApp(ctk.CTk):
                             data = _json.load(f)
                         actions = data.get("actions", data) if isinstance(data, dict) else data
                         tasks.append({"name": label, "actions": actions})
+                        self._log(f"  ✓ {label} — {len(actions)} actions", "info")
+                    except Exception as e:
+                        self._log(f"  ✗ Failed to load {json_file.name}: {e}", "error")
+                else:
+                    self._log(f"  ⚠ {label} — tasks/{json_key}.json not found, skipping", "warn")
+
+        def _add_upgrade_buildings():
+            upgrade_cfg = farm_tasks.get("upgrade_buildings", {})
+            if not upgrade_cfg.get("enabled", False):
+                self._log("  Upgrade Buildings disabled — skipping", "warn")
+                return
+            for key, label, json_key in UPGRADE_BUILDING_TASKS:
+                if not upgrade_cfg.get(key, True):
+                    self._log(f"  ⏭ Skipping {label} (disabled)", "info")
+                    continue
+                json_file = tasks_dir / f"{json_key}.json"
+                if json_file.exists():
+                    try:
+                        with open(json_file, encoding="utf-8") as f:
+                            data = _json.load(f)
+                        actions = data.get("actions", data) if isinstance(data, dict) else data
+                        _task = {"name": label, "actions": actions}
+                        if isinstance(data, dict) and data.get("loop"):
+                            _task["loop"] = True
+                            if "max_loop_iterations" in data:
+                                _task["max_loop_iterations"] = data["max_loop_iterations"]
+                        tasks.append(_task)
                         self._log(f"  ✓ {label} — {len(actions)} actions", "info")
                     except Exception as e:
                         self._log(f"  ✗ Failed to load {json_file.name}: {e}", "error")
@@ -2768,16 +3132,41 @@ class BotApp(ctk.CTk):
             except Exception as e:
                 self._log(f"  ✗ Failed to load shield.json: {e}", "error")
 
+        def _add_train_troops():
+            tt_cfg = farm_tasks.get("train_troops", {})
+            if not tt_cfg.get("enabled", True):
+                self._log("  Train Troops disabled — skipping", "warn")
+                return
+            json_file = tasks_dir / "train_troops.json"
+            if not json_file.exists():
+                self._log("  ⚠ train_troops.json not found, skipping", "warn")
+                return
+            try:
+                with open(json_file, encoding="utf-8") as f:
+                    data = _json.load(f)
+                actions = data.get("actions", data) if isinstance(data, dict) else data
+                if not actions:
+                    self._log("  ⚠ train_troops.json has no actions yet — skipping", "warn")
+                    return
+                tasks.append({"name": "Train Troops", "actions": actions})
+                self._log(f"  ✓ Train Troops — {len(actions)} actions", "info")
+            except Exception as e:
+                self._log(f"  ✗ Failed to load train_troops.json: {e}", "error")
+
         _builders = {
             "daily_tasks":     _add_daily,
             "rally":           _add_rally,
+            "furylord":        _add_furylord,
             "gathering":       _add_gathering,
             "alliance":        _add_alliance,
             "alliance_mining": _add_alliance_mining,
+            "upgrade_buildings": _add_upgrade_buildings,
             "trucks":          _add_trucks,
             "bounties":        _add_bounties,
             "research":        _add_research,
             "shield":          _add_shield,
+            "full_preparedness": _add_full_preparedness,
+            "train_troops":    _add_train_troops,
         }
 
         default_order = [c["key"] for c in TASK_CATEGORIES]
@@ -2823,7 +3212,9 @@ class BotApp(ctk.CTk):
         def _do():
             self.log_box.configure(state="normal")
             ts = datetime.now().strftime("%H:%M:%S")
-            self.log_box.insert("end", f"[{ts}] {message}\n", level)
+            line = f"[{ts}] {message}"
+            insert_at = self.log_box.index("end-1c")
+            self.log_box.insert("end", f"{line}\n", level)
             self.log_box.see("end")
             self.log_box.configure(state="disabled")
             # Persist the pane to a daily file — executor/pre-farm detail only
@@ -2832,10 +3223,53 @@ class BotApp(ctk.CTk):
                 Path("logs").mkdir(exist_ok=True)
                 with open(f"logs/gui_{datetime.now():%Y%m%d}.log", "a",
                           encoding="utf-8") as _gf:
-                    _gf.write(f"[{ts}] {message}\n")
+                    _gf.write(f"{line}\n")
+            except Exception:
+                pass
+            # Real-time anomaly flagging — every displayed line passes through
+            # here regardless of which farm/engine produced it, so this is the
+            # single choke point to watch rather than each engine's on_log.
+            try:
+                anomaly = self._anomaly_watcher.feed(line)
+                if anomaly:
+                    self._add_anomaly(anomaly, insert_at)
             except Exception:
                 pass
         self.after(0, _do)
+
+    def _add_anomaly(self, anomaly, log_index: str):
+        """Append a flagged anomaly row; clicking it jumps to and highlights
+        the offending line in the main Activity Log."""
+        if not hasattr(self, "anomaly_box"):
+            return
+        self.anomaly_box.configure(state="normal")
+        if self._anomaly_targets == {}:
+            self.anomaly_box.delete("1.0", "end")  # clear the "No anomalies yet" placeholder
+        tag = f"anomaly_{len(self._anomaly_targets)}"
+        self._anomaly_targets[tag] = log_index
+        ts = anomaly.timestamp or datetime.now().strftime("%H:%M:%S")
+        row = f"[{ts}] {anomaly.severity.upper():6} {anomaly.reason}\n"
+        self.anomaly_box.insert("end", row, (anomaly.severity, tag))
+        self.anomaly_box.tag_bind(tag, "<Button-1>",
+                                   lambda e, idx=log_index: self._jump_to_log_line(idx))
+        self.anomaly_box.see("end")
+        self.anomaly_box.configure(state="disabled")
+
+    def _jump_to_log_line(self, log_index: str):
+        """Scroll the Activity Log to a flagged line and briefly highlight it."""
+        self.log_box.see(log_index)
+        line_start = f"{log_index.split('.')[0]}.0"
+        line_end = f"{line_start} lineend"
+        self.log_box.tag_add("jump_highlight", line_start, line_end)
+        self.log_box.tag_config("jump_highlight", background=C["accent"], foreground=C["bg"])
+        self.after(1500, lambda: self.log_box.tag_remove("jump_highlight", "1.0", "end"))
+
+    def _clear_anomalies(self):
+        self.anomaly_box.configure(state="normal")
+        self.anomaly_box.delete("1.0", "end")
+        self.anomaly_box.insert("end", "No anomalies yet — flags likely bugs the instant they're logged.\n", "low")
+        self.anomaly_box.configure(state="disabled")
+        self._anomaly_targets = {}
 
     def _clear_log(self):
         self.log_box.configure(state="normal")
@@ -2896,11 +3330,14 @@ class BotApp(ctk.CTk):
                     self._cycle_complete_time = None
                     self._start_all()
 
-        # Pre-buster shield window check (throttled to ~30s), only while
-        # idle between cycles.
+        # Pre-buster shield window check (throttled to ~30s). Deliberately
+        # NOT gated on self._cycle_complete_time (idle-between-cycles) — the
+        # window needs to fire even while a farm is actively mid-cycle, and
+        # _maybe_start_pre_buster_run already stops busy farms to make room.
+        # A previous version gated this on idle state and the window was
+        # missed entirely on 2026-08-07 because a farm was still running.
         import time as _time
-        if (self._cycle_complete_time
-                and _time.time() - self._pre_buster_last_check >= 30):
+        if _time.time() - self._pre_buster_last_check >= 30:
             self._pre_buster_last_check = _time.time()
             try:
                 self._maybe_start_pre_buster_run()

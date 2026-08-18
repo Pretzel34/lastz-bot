@@ -1,0 +1,170 @@
+{
+  "name": "start_build",
+  "loop": true,
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "note": "Guarantee HQ view before touching any build actions — returns to HQ if in world, no-ops if already in HQ"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_build_icon.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_finish_now.png",
+      "required": false,
+      "set_flag": "finish_now_found",
+      "log_success": "Finish Now found — claiming free finish",
+      "log_skip": "No Finish Now — checking for speed-up prompt"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "finish_now_found"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_finish_congrats.png",
+      "if_flag": "finish_now_found",
+      "required": false,
+      "skip_to_on_found": 23,
+      "log_success": "Building finished — looping to check for more",
+      "note": "Step 4 flow: confirms the free finish, then skips straight past the Back step to the final wait so the loop restarts without also trying to start a new build this pass."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_initiate_build_alt.png",
+      "if_not_flag": "finish_now_found",
+      "required": false,
+      "set_flag": "initiate_build_found",
+      "log_success": "Initiate Build found — starting a new build/upgrade",
+      "log_skip": "No Initiate Build — checking for speed-up prompt"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_found",
+      "template": "btn_speed_up.png",
+      "if_not_flag": "initiate_build_found",
+      "set_flag": "speed_up_found",
+      "skip_to_on_found": 12,
+      "log_found": "Speed-up prompt found with no Initiate Build available — nothing left to build for free (not tapping, verification only)",
+      "log_skip": "No speed-up prompt either — nothing to do this pass",
+      "note": "Presence check only — does not tap btn_speed_up. skip_to_on_found just points at the next step so it continues normally either way."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_upgrade.png",
+      "if_flag": "initiate_build_found",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_upgrade_start_alt.png",
+      "if_flag": "initiate_build_found",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_get_building_help.png",
+      "if_flag": "initiate_build_found",
+      "required": false,
+      "skip_to_on_found": 23,
+      "log_success": "Building help requested — skipping back-out, looping directly",
+      "note": "When this tap succeeds we're already in a state where the back-out chain isn't needed — skip straight to the final wait so the loop restarts from step 1."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_exit_purchase.png",
+      "if_flag": "speed_up_found",
+      "required": false,
+      "note": "Speed-up-only case: close the purchase dialog first. Does NOT end the task here — that only removes this one popup, the building detail panel underneath is still open, so the next two steps back out of it properly before finishing."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "if_flag": "speed_up_found",
+      "required": false,
+      "finish_task_on_success": true,
+      "abort_task_if_not_found": true,
+      "log_success": "Only speed-up available, no Initiate Build — backed out and ending the loop",
+      "log_skip": "No back button found after closing purchase dialog — already at HQ, ending the loop anyway",
+      "note": "Speed-up-only exit condition: ends the task once we've confirmed nothing free to build this pass, whether or not a back button was found (closing btn_exit_purchase sometimes already returns straight to HQ with no panel left to back out of)."
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "if_not_flag": ["initiate_build_found", "speed_up_found"],
+      "required": false,
+      "finish_task_on_success": true,
+      "abort_task_if_not_found": true,
+      "log_success": "Nothing to build and no speed-up prompt either — backed out and ending the loop",
+      "log_skip": "No back button found and nothing to build this pass — ending the loop anyway",
+      "note": "Nothing-found exit condition: neither an initiate-build icon nor a speed-up prompt appeared this pass (e.g. all build queues already occupied) — ends the task instead of burning through max_loop_iterations doing nothing."
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "required": false,
+      "log_skip": "No back button found — could not back out to HQ view",
+      "note": "Step 12: back out to HQ view before the loop restarts (a build was initiated this pass — keep looping in case another building is idle)"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    }
+  ]
+}

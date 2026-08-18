@@ -1,0 +1,91 @@
+{
+  "name": "fp_age_of_science_research",
+  "actions": [
+    {
+      "action": "run_task",
+      "task": "research.json",
+      "contain_abort": true,
+      "note": "Ensure a research is running before checking for completion/speed-up below. research.json ABORT_TASKs by design once it's handled the in-progress/no-research-needed case — contain_abort keeps that from also ending this task."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_to_world_view.png",
+      "world_btn": "btn_go_to_hq_view.png",
+      "note": "research.json's own back-out can leave the tech-tree view one layer deep (e.g. an ally-assist confirmation eats the back tap) — confirm we're actually back at HQ before looking for the research icon/speed-up below, or everything after this silently no-ops against the wrong screen"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_research_icon.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_complete_research.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_post_complete_research.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_use_research_speed_up.png",
+      "fallback_template": "btn_speed_up_alt.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_use_research_speed_up.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_exit_purchase.png",
+      "required": false,
+      "note": "Step 12: close any leftover speed-up purchase prompt before collecting rewards"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_exit_purchase.png",
+      "required": false,
+      "note": "Sometimes a second purchase/confirmation popup stacks on top of the first — try exit again before moving on"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    }
+  ]
+}

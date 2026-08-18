@@ -9,7 +9,7 @@
       "action": "ensure_hq_view",
       "hq_btn": "btn_go_world.png",
       "world_btn": "btn_go_headquarters.png",
-      "note": "Guarantee a known starting state — returns to HQ if in world, no-ops if already in HQ"
+      "note": "Guarantee a known starting state \u00e2\u20ac\u201d returns to HQ if in world, no-ops if already in HQ"
     },
     {
       "action": "wait",
@@ -19,7 +19,26 @@
       "action": "if_template_tap",
       "template": "btn_go_world.png",
       "required": false,
-      "note": "Navigate from HQ to world view — skip if already in world"
+      "note": "Navigate from HQ to world view \u00e2\u20ac\u201d skip if already in world"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_rally_reward_chest.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_template",
+      "template": "btn_claim_all_generic.png",
+      "fallback_template": "btn_close.png",
+      "required": false
     },
     {
       "action": "wait",
@@ -28,13 +47,25 @@
     {
       "action": "check_formations_busy",
       "slots": [
-        {"x_pct": 92.6, "y_pct": 51.0},
-        {"x_pct": 92.8, "y_pct": 56.9},
-        {"x_pct": 92.6, "y_pct": 62.5},
-        {"x_pct": 92.8, "y_pct": 68.0}
+        {
+          "x_pct": 92.6,
+          "y_pct": 51.0
+        },
+        {
+          "x_pct": 92.8,
+          "y_pct": 56.9
+        },
+        {
+          "x_pct": 92.6,
+          "y_pct": 62.5
+        },
+        {
+          "x_pct": 92.8,
+          "y_pct": 68.0
+        }
       ],
       "locked_template": "btn_fourth_formation_locked.png",
-      "note": "Abort early if all formation slots are already occupied — no point searching for a boomer"
+      "note": "Abort early if all formation slots are already occupied \u00e2\u20ac\u201d no point searching for a boomer"
     },
     {
       "action": "tap_template_or_zone",
@@ -55,8 +86,8 @@
         "btn_stegosaurus_boomer.png"
       ],
       "skip_task_if_not_found": true,
-      "log_skip": "Boomer search panel not found — wrong screen, cancelling task",
-      "note": "Select Boomer category. If neither template is visible the search panel didn't open — abort rather than continue on the wrong screen."
+      "log_skip": "Boomer search panel not found \u00e2\u20ac\u201d wrong screen, cancelling task",
+      "note": "Select Boomer category. If neither template is visible the search panel didn't open \u00e2\u20ac\u201d abort rather than continue on the wrong screen."
     },
     {
       "action": "wait",
@@ -106,18 +137,32 @@
       "fallback_template": "btn_march_on_boomer_alt.png",
       "fuel_template": "btn_out_of_fuel.png",
       "required": false,
-      "log_skip": "Troops busy — march not available, skipping rally attempt",
+      "log_skip": "Troops busy \u00e2\u20ac\u201d march not available, skipping rally attempt",
       "on_not_found": [
-        { "action": "if_template_tap", "template": "btn_back_out_of_page.png", "required": false },
-        { "action": "wait", "seconds": 2.0 },
-        { "action": "if_template_tap", "template": "btn_back_out_of_page.png", "required": false },
-        { "action": "wait", "seconds": 2.0 }
+        {
+          "action": "if_template_tap",
+          "template": "btn_back_out_of_page.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 2.0
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_back_out_of_page.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 2.0
+        }
       ],
-      "note": "If out of fuel, restore_fuel runs automatically and retries. If march still absent, troops are busy — close panel and abort."
+      "note": "If out of fuel, restore_fuel runs automatically and retries. If march still absent, troops are busy \u00e2\u20ac\u201d close panel and abort."
     },
     {
       "action": "rally_count_record",
-      "note": "Only reached when march was successfully tapped — record the rally now"
+      "note": "Only reached when march was successfully tapped \u00e2\u20ac\u201d record the rally now"
     },
     {
       "action": "wait",

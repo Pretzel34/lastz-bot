@@ -150,6 +150,15 @@ class VisionEngine:
             print(f"[Vision] Template not found: {template_path}")
             return MatchResult(found=False)
 
+        # A region clamped to screen bounds (e.g. a verify crop pushed off-edge
+        # by offset_x/margin_x near x=0) can end up smaller than the template
+        # itself — cv2.matchTemplate asserts in that case rather than just
+        # reporting no match, so guard it explicitly.
+        crop_h, crop_w = screen_cv.shape[:2]
+        th, tw = template_cv.shape[:2]
+        if crop_h < th or crop_w < tw:
+            return MatchResult(found=False)
+
         # Run template matching
         result = cv2.matchTemplate(screen_cv, template_cv, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
@@ -205,8 +214,15 @@ class VisionEngine:
             screen_cv = screen_cv[y1:y2, x1:x2]
             offset_x, offset_y = x1, y1
 
-        result = cv2.matchTemplate(screen_cv, template_cv, cv2.TM_CCOEFF_NORMED)
+        # See find_template() — a region clamped to screen bounds can end up
+        # smaller than the template, which crashes cv2.matchTemplate instead
+        # of just reporting no matches.
         th, tw = template_cv.shape[:2]
+        crop_h, crop_w = screen_cv.shape[:2]
+        if crop_h < th or crop_w < tw:
+            return []
+
+        result = cv2.matchTemplate(screen_cv, template_cv, cv2.TM_CCOEFF_NORMED)
 
         locations = np.where(result >= threshold)
         matches = []
@@ -577,6 +593,17 @@ class VisionEngine:
     def _pil_to_cv(self, img: Image.Image) -> np.ndarray:
         """Convert PIL Image to OpenCV numpy array (RGB)."""
         return np.array(img.convert("RGB"))
+
+    def is_blank_screen(self, screenshot: Image.Image, stddev_threshold: float = 4.0) -> bool:
+        """
+        Cheap check for a frozen/crashed display — true when the screenshot is
+        essentially a single flat color (e.g. solid black). No template could
+        ever legitimately match this, so a search that comes up empty against
+        a blank screen means the game has frozen, not that there's simply
+        nothing on screen to find.
+        """
+        arr = self._pil_to_cv(screenshot)
+        return float(arr.std()) < stddev_threshold
 
     def _load_template(self, path: str) -> Optional[np.ndarray]:
         """Load and cache a template image."""

@@ -539,6 +539,8 @@ class BotEngine:
 
     def _ensure_app_focus(self):
         """If Last Z is not the foreground app, dismiss the intruder and return to the game."""
+        import re
+
         try:
             focus_info = self.bot.get_foreground_app()
             if self._GAME_PACKAGE in focus_info:
@@ -553,13 +555,21 @@ class BotEngine:
                 self._log("  ✓ Last Z back in focus")
                 return
 
-            # Still not in focus — force-stop Play Store then relaunch the game
-            self._log("  ⚠ Still not in focus — force-stopping Play Store and relaunching Last Z")
-            self.bot.stop_app("com.android.vending")
+            # Still not in focus — force-stop whatever app actually took focus
+            # (an ad can open any package, not just the Play Store), then relaunch the game
+            m = re.search(r"u0 ([\w.]+)/", focus_info)
+            intruder_pkg = m.group(1) if m else "com.android.vending"
+            self._log(f"  ⚠ Still not in focus — force-stopping '{intruder_pkg}' and relaunching Last Z")
+            self.bot.stop_app(intruder_pkg)
             time.sleep(1.0)
             self.bot.launch_app(self._GAME_PACKAGE)
             time.sleep(5.0)
-            self._log("  ✓ Last Z relaunched")
+
+            focus_info = self.bot.get_foreground_app()
+            if self._GAME_PACKAGE in focus_info:
+                self._log("  ✓ Last Z relaunched and back in focus")
+            else:
+                self._log("  ⚠ Last Z relaunched but still not in focus")
         except Exception as e:
             self._log(f"  ⚠ focus check failed: {e}")
 

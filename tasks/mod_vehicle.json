@@ -4,8 +4,26 @@
     {
       "action": "loop_task",
       "task": "mod_vehicle_rally.json",
-      "max_iterations": 10,
-      "note": "Repeat boomer rallies until objective verified complete or max iterations hit"
+      "max_iterations": 30,
+      "note": "Repeat boomer rallies until objective verified complete or max iterations hit. 30 is comfortably above any farm's rally.max_rallies_per_day, so the per-farm daily budget (rally_count_check) is always the real limiter, not this cap — chest 3 needs drastically more rallies than 1/2, and formations stay busy for many minutes after a batch, so the old cap of 10 was stopping short of the daily budget while formations were still cycling free."
+    },
+    {
+      "action": "run_task",
+      "task": "fp_reward_collection.json",
+      "note": "Claim any FP rewards unlocked by the rallies above — same pattern hero_progression.json/age_of_science.json use"
+    },
+    {
+      "action": "loop_task",
+      "task": "mod_vehicle_rally.json",
+      "max_iterations": 30,
+      "if_not_flag": ["fp_chest1_claimed", "fp_chest2_claimed", "fp_chest3_claimed"],
+      "note": "No chest was claimed on the first pass — run another rally batch before trying collection again. Same 30-cap reasoning as the first loop_task above."
+    },
+    {
+      "action": "run_task",
+      "task": "fp_reward_collection.json",
+      "if_not_flag": ["fp_chest1_claimed", "fp_chest2_claimed", "fp_chest3_claimed"],
+      "note": "Retry collection after the extra rally batch above — medal chest (24hr) is untouched by this retry, only chests 1-3 (4hr window) gate it"
     }
   ]
 }

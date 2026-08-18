@@ -1,0 +1,231 @@
+{
+  "name": "Furylord",
+  "actions": [
+    {
+      "action": "rally_count_check",
+      "counter_key": "furylord",
+      "max_rallies": 4,
+      "note": "Dedicated daily attack budget for Furylord (own bucket, own cap of 4) — separate from rally.max_rallies_per_day which governs regular boomer rallies. Aborts the whole task before it starts once 4 attacks are recorded today."
+    },
+    {
+      "action": "center_hq",
+      "note": "Run tasks/center_hq.json to reset camera"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_event_center.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_furylord_icon_3.png",
+      "fallback_templates": [
+        "btn_furylord_icon_3_alt.png",
+        "btn_furylord_icon_2.png",
+        "btn_furylord_icon_2_alt.png"
+      ],
+      "required": false,
+      "on_not_found_continue": true,
+      "on_not_found": [
+        {
+          "action": "scroll_left",
+          "note": "Icon row may be scrolled — try left first"
+        },
+        {
+          "action": "wait",
+          "seconds": 1.5
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_furylord_icon_3.png",
+          "fallback_templates": [
+            "btn_furylord_icon_3_alt.png",
+            "btn_furylord_icon_2.png",
+            "btn_furylord_icon_2_alt.png"
+          ],
+          "required": false
+        },
+        {
+          "action": "scroll_right",
+          "steps": 2,
+          "note": "Undo the left scroll and continue past the original position to the right"
+        },
+        {
+          "action": "wait",
+          "seconds": 1.5
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_furylord_icon_3.png",
+          "fallback_templates": [
+            "btn_furylord_icon_3_alt.png",
+            "btn_furylord_icon_2.png",
+            "btn_furylord_icon_2_alt.png"
+          ],
+          "required": false
+        }
+      ],
+      "note": "Select the Furylord event icon. Icon art changes with the season, so both variants (icon_3/icon_2) and their already-selected states (_alt) are checked before falling back to scrolling."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_found",
+      "template": "btn_fury_lord_rewards_claimed.png",
+      "log_found": "Rewards already claimed — skipping collect tap and dismiss",
+      "log_skip": "Rewards not yet claimed — collecting",
+      "skip_to_on_found": 12,
+      "note": "If already claimed, jump straight past the collect tap (step 9) and its dismiss (step 11) to the wait before btn_go_generic"
+    },
+    {
+      "action": "tap_zone",
+      "x_pct": 50.2,
+      "y_pct": 76.2,
+      "note": "Collect Rewards"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_finish_congrats.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_generic.png",
+      "required": false,
+      "log_skip": "Furylord event not currently available — backing out and ending task",
+      "on_not_found": [
+        {
+          "action": "if_template_tap",
+          "template": "btn_back_out_of_page.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 2.0
+        }
+      ],
+      "note": "This is a timed event — when it's not running, btn_go_generic won't appear. Back out and end the task; no back-out needed when the event is available."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_attack_furylord.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_found",
+      "template": "btn_collected_all_furylord.png",
+      "log_found": "All Furylord rewards already collected today — exiting without attacking",
+      "log_skip": "Rewards not fully collected — continuing to attack",
+      "on_found": [
+        {
+          "action": "if_template_tap",
+          "template": "btn_exit_purchase.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 4.0
+        }
+      ],
+      "skip_to_on_found": 23,
+      "note": "If all 4 attacks' rewards are already collected, exit the purchase/attack panel and jump straight to the final HQ-view step"
+    },
+    {
+      "action": "check_formations_busy",
+      "slots": [
+        {
+          "x_pct": 92.6,
+          "y_pct": 51.0
+        },
+        {
+          "x_pct": 92.8,
+          "y_pct": 56.9
+        },
+        {
+          "x_pct": 92.6,
+          "y_pct": 62.5
+        },
+        {
+          "x_pct": 92.8,
+          "y_pct": 68.0
+        }
+      ],
+      "locked_template": "btn_fourth_formation_locked.png",
+      "note": "Abort early if all formation slots are already occupied — no point continuing to march"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_march_on_boomer.png",
+      "fallback_template": "btn_march_on_boomer_alt.png",
+      "fuel_template": "btn_out_of_fuel.png",
+      "required": false,
+      "log_skip": "Troops busy — march not available, skipping attack attempt",
+      "on_not_found": [
+        {
+          "action": "if_template_tap",
+          "template": "btn_back_out_of_page.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 2.0
+        },
+        {
+          "action": "if_template_tap",
+          "template": "btn_back_out_of_page.png",
+          "required": false
+        },
+        {
+          "action": "wait",
+          "seconds": 2.0
+        }
+      ],
+      "note": "If out of fuel, restore_fuel runs automatically and retries. If march still absent, troops are busy — close panel and abort."
+    },
+    {
+      "action": "rally_count_record",
+      "counter_key": "furylord",
+      "note": "Only reached when the march was successfully tapped — records this as one of the 4 daily attacks. Must match rally_count_check's counter_key above."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_or_template",
+      "template": "btn_go_to_hq_view_universal.png",
+      "fallback_template": "btn_go_to_hq_view.png",
+      "required": false
+    }
+  ]
+}

@@ -2,13 +2,20 @@
   "name": "deploy_trucks",
   "actions": [
     {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "note": "Guarantee HQ view before touching the truck icon — the previous task may have left the game on a different screen"
+    },
+    {
       "action": "wait",
       "seconds": 2.0
     },
     {
       "action": "if_template_tap",
       "template": "btn_truck_icon.png",
-      "required": true
+      "skip_task_if_not_found": true,
+      "log_skip": "btn_truck_icon not found even after ensure_hq_view — aborting instead of tapping blind through the rest of the task"
     },
     {
       "action": "wait",
@@ -83,6 +90,24 @@
           "note": "Let the My Trucks list reload before the next loop check"
         }
       ]
+    },
+    {
+      "action": "tap_first_found",
+      "templates": ["btn_back.png", "btn_back_out_of_page.png", "btn_press_back.png", "btn_hero_back.png"],
+      "required": false,
+      "log_skip": "No back button found — could not back out of My Trucks",
+      "note": "Back out of the My Trucks sub-tab — the task never returns to HQ on its own otherwise, leaving the next task to misread the wrong screen (e.g. Bounty Missions concluding 'already done' when it's really just looking at the trucks panel)"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_first_found",
+      "templates": ["btn_back.png", "btn_back_out_of_page.png", "btn_press_back.png", "btn_hero_back.png"],
+      "required": false,
+      "log_skip": "No back button found on second pass — could not back out to HQ view",
+      "note": "Second pass — truck icon panel is a level above My Trucks, so one tap alone may not reach HQ"
     }
   ]
 }

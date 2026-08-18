@@ -61,11 +61,36 @@
     {
       "action": "if_template_tap",
       "template": "btn_buy_alliance_store.png",
-      "set_flag": "shield_purchased",
-      "log_success": "Shield purchased with diamonds",
+      "set_flag": "shield_buy_tapped",
+      "log_success": "Buy tapped — checking for confirmation popup",
       "log_skip": "Not purchased — buy button not found",
       "required": false,
-      "note": "Step 11: buy if possible; on success the popup closes by itself and the flag tells the shield task to apply the new shield"
+      "note": "Step 11: tap buy. This sometimes shows a second confirmation popup (not guaranteed) that requires tapping btn_verify_buy_shield_from_item to actually complete the purchase — handled by the next two steps."
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0,
+      "if_flag": "shield_buy_tapped",
+      "note": "Give the confirmation popup a moment to render if it's going to appear"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_verify_buy_shield_from_item.png",
+      "if_flag": "shield_buy_tapped",
+      "set_flag": "shield_purchased",
+      "log_success": "Confirmation popup appeared — confirmed purchase",
+      "log_skip": "No confirmation popup — purchase already completed",
+      "required": false,
+      "note": "Step 11b: if the confirmation popup showed up, tap it to actually complete the purchase and mark shield_purchased true. If it never appears, the buy tap alone already completed the purchase — the next step covers that case."
+    },
+    {
+      "action": "wait",
+      "seconds": 0.1,
+      "if_flag": "shield_buy_tapped",
+      "if_not_flag": "shield_purchased",
+      "set_flag": "shield_purchased",
+      "log_success": "No confirmation needed — purchase completed on first tap",
+      "note": "Step 11c: only reached when the buy tap succeeded but no confirmation popup showed up — mark it purchased since nothing more was required. Prevents the false-positive/false-negative case the earlier single-step version had."
     },
     {
       "action": "if_template_tap",

@@ -2,10 +2,21 @@
   "name": "hero_progression",
   "actions": [
     {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "note": "Guarantee HQ view before entering the hero panel — the previous task may have left the game on a different screen"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
       "action": "if_template_tap",
       "template": "btn_enter_hero.png",
       "fallback_template": "btn_enter_hero_alt.png",
-      "required": true
+      "skip_task_if_not_found": true,
+      "log_skip": "btn_enter_hero not found even after ensure_hq_view — aborting instead of tapping blind through the rest of the task"
     },
     {
       "action": "wait",
@@ -16,7 +27,7 @@
       "template": "btn_upgrade_indicator.png",
       "fallback_template": "btn_upgrade_indicator_alt.png",
       "required": false,
-      "skip_to_on_found": 8
+      "skip_to_on_found": 10
     },
     {
       "action": "wait",
@@ -89,6 +100,12 @@
     {
       "action": "run_task",
       "task": "fp_reward_collection.json"
+    },
+    {
+      "action": "run_task",
+      "task": "fp_reward_collection.json",
+      "if_not_flag": "fp_chest3_claimed",
+      "note": "Chest 3 wasn't claimed on the first pass — try once more before finishing"
     }
   ]
 }

@@ -77,7 +77,8 @@
     },
     {
       "action": "read_current_fp_event",
-      "note": "OCR the green-highlighted row to capture the currently active FP event"
+      "required": false,
+      "note": "OCR the green-highlighted row to capture the currently active FP event. required:false so a capture miss (bad OCR, no highlight) doesn't abort the task before the back-out taps below — otherwise the game is left sitting in the schedule panel, not HQ view."
     },
     {
       "action": "if_template_tap",

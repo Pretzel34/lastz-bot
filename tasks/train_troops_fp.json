@@ -1,0 +1,69 @@
+{
+  "name": "train_troops_fp",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "note": "Guarantee HQ view before anything else"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Nav to world view — first half of the center-camera round trip"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_headquarters.png",
+      "required": false,
+      "note": "Back to HQ view, now centered — do this before any scroll-based search below"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_assaulter_camp.png",
+      "fallback_template": "btn_assaulter_camp_alt.png",
+      "required": false,
+      "note": "Find and tap the Assaulter Camp — this alone collects any troops already finished training, no need to enter the training tab or select a tier for the FP objective. Independent of train_troops.enable_assaulter."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "note": "Let any collect animation/popup settle before searching for the next camp"
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_rider_camp.png",
+      "fallback_template": "btn_rider_camp_alt.png",
+      "required": false,
+      "note": "Same as the Assaulter step above, independent of train_troops.enable_rider"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_shooter_camp.png",
+      "fallback_template": "btn_shooter_camp_alt.png",
+      "required": false,
+      "note": "Same as above, independent of train_troops.enable_shooter"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    }
+  ]
+}

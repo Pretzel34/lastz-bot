@@ -176,6 +176,8 @@ class ActionExecutor:
         loop_until_template      - run on_each actions repeatedly until any of the specified templates appears
         run_task_if_template     - run a sub-task JSON only if an identifying template is visible; silently skips if not found
         tap_template_from_setting - tap the template mapped from a farm-setting value, scrolling down to find it
+        skip_to_unless_setting   - jump to a later step unless a farm-setting toggle is truthy
+        select_troop_level       - scroll the level carousel left to find/tap the level a farm setting targets
     """
 
     def __init__(
@@ -199,6 +201,11 @@ class ActionExecutor:
         self._used_slot_indices: set = set()  # slot indices already tapped this session (0-based)
         self.emulator_type = emulator_type
         self._flags: dict = {}         # session flags set via 'set_flag', read via 'if_flag'/'if_not_flag'
+        # Set externally (gui.py) for a manually-triggered pre-buster shield test —
+        # makes skip_unless_enemy_buster_day treat it as the real pre-buster window
+        # regardless of actual server day/time, so a test exercises the full shield
+        # flow instead of stopping at the day gate. Never set outside a test run.
+        self.pre_buster_test_mode = False
 
     def reset_flags(self):
         """Clear session flags set via 'set_flag'. Called by BotEngine at the start of each task."""
@@ -207,6 +214,46 @@ class ActionExecutor:
     def set_farm_settings(self, settings: dict):
         """Update farm task settings (e.g. rally.boomer_level). Called by BotEngine before each task."""
         self.farm_settings = settings or {}
+
+    _GAME_PACKAGE = "com.readygo.barrel.gp"
+
+    def _check_frozen_screen(self, screenshot, context: str) -> bool:
+        """
+        Called after a multi-position scroll search comes up completely empty.
+        A blank/uniform screenshot after scrolling to several different
+        positions isn't "nothing to collect" — no template could ever match
+        that, so it means the game has frozen or crashed to a blank frame.
+        Force-restarts the game immediately rather than leaving it to the
+        farm-level watchdog, which can take up to max_farm_timeout minutes.
+
+        Returns True if a freeze was detected (and a restart attempted).
+        """
+        if not self.vision.is_blank_screen(screenshot):
+            return False
+        self._log(f"  ⚠ Screen appears frozen/blank ({context}) — force-restarting the game")
+        try:
+            self.bot.stop_app(self._GAME_PACKAGE)
+            time.sleep(1.0)
+            self.bot.launch_app(self._GAME_PACKAGE)
+            time.sleep(5.0)
+            self._log("  ✓ Game restarted after frozen-screen detection")
+        except Exception as e:
+            self._log(f"  ⚠ Frozen-screen restart failed: {e}")
+        return True
+
+    @staticmethod
+    def _is_device_disconnect(message: str) -> bool:
+        """
+        Mirrors bot_engine.py's BotEngine._is_device_disconnect — used by
+        run_task/loop_task to recognize an ADB device-disconnect on a nested
+        sub-action so they can bail out immediately instead of grinding
+        through the rest of the sub-task re-failing the same way on every
+        remaining step. Propagating a FAILED result up lets bot_engine's own
+        retry loop see it and trigger its existing reconnect logic, which
+        nested sub-actions otherwise never get a chance to reach.
+        """
+        msg = (message or "").lower()
+        return "not found" in msg and ("device" in msg or "127.0.0.1" in msg)
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -349,6 +396,8 @@ class ActionExecutor:
             "tap_active_alliance_mine":    self._tap_active_alliance_mine,
             "tap_free_formation":       self._tap_free_formation,
             "check_claimed":            self._check_claimed,
+            "check_template_present":   self._check_template_present,
+            "skip_to_if_flag":          self._skip_to_if_flag,
             "repeat_if_template":       self._repeat_if_template,
             "long_press_template":      self._long_press_template,
             "verify_setting_template":  self._verify_setting_template,
@@ -382,6 +431,9 @@ class ActionExecutor:
             "read_current_fp_event":     self._read_current_fp_event,
             "tap_selected_research":     self._tap_selected_research,
             "tap_template_from_setting": self._tap_template_from_setting,
+            "skip_to_unless_setting":    self._skip_to_unless_setting,
+            "select_troop_level":        self._select_troop_level,
+            "promote_highest_troop":     self._promote_highest_troop,
             "dispatch_fp_task":          self._dispatch_fp_task,
         }
 
@@ -648,8 +700,8 @@ class ActionExecutor:
         # Check which view we are in using the HQ view indicator
         # hq_btn is ONLY visible when in HQ view
         # world_btn is ONLY visible when in world view
-        in_hq    = self.vision.find_template(screenshot, hq_path)    is not None
-        in_world = self.vision.find_template(screenshot, world_path) is not None
+        in_hq    = self.vision.find_template(screenshot, hq_path).found
+        in_world = self.vision.find_template(screenshot, world_path).found
 
         if self.log_callback:
             self.log_callback(f"ensure_hq_view: in_hq={in_hq} in_world={in_world}")
@@ -698,8 +750,8 @@ class ActionExecutor:
         hq_path    = self._template_path(HQ_BTN)
         world_path = self._template_path(WORLD_BTN)
 
-        in_hq    = self.vision.find_template(screenshot, hq_path)    is not None
-        in_world = self.vision.find_template(screenshot, world_path) is not None
+        in_hq    = self.vision.find_template(screenshot, hq_path).found
+        in_world = self.vision.find_template(screenshot, world_path).found
 
         if self.log_callback:
             self.log_callback(f"verify_in_hq: in_hq={in_hq} in_world={in_world}")
@@ -1009,6 +1061,101 @@ class ActionExecutor:
             )
         return self._ok(action, "Not claimed yet — continuing")
 
+    def _check_template_present(self, action: dict) -> ActionResult:
+        """
+        Check whether a template is currently visible on screen — WITHOUT tapping
+        it. Pair with 'set_flag' (handled generically by execute() based on this
+        action's SUCCESS/SKIPPED status — see below) and a later
+        'skip_to_if_flag'/'if_flag' to act on the result.
+
+        Use this instead of if_template_tap/check_claimed when you need to read
+        persistent on-screen state (e.g. an "already collected" badge) purely to
+        record it, with no tap side effect at all.
+
+        Returns SUCCESS when found, SKIPPED when not found — same convention
+        if_template_tap already uses, so 'set_flag' (applied generically by
+        execute() as `result.status == SUCCESS`) correctly records True/False.
+        Do NOT set the flag manually inside this handler — execute() already
+        does it from the returned status, and setting it twice here previously
+        caused the flag to always end up True regardless of what was actually
+        on screen (confirmed live 2026-08-11: fp_chestN_already_collected was
+        always True, so chest collection always skipped straight to the medal
+        chest section and never attempted the two chests that were genuinely
+        still unclaimed).
+
+        Required:
+            template - template filename to check for
+
+        Optional:
+            fallback_template  - single fallback template, checked if the primary isn't found
+            fallback_templates - list of fallback templates, checked in order
+            set_flag  - session flag name recorded True/False based on whether ANY
+                        of template/fallbacks was found (handled by execute(), not here)
+            threshold - vision confidence override
+
+        Example:
+            {"action": "check_template_present", "template": "btn_first_fp_chest_collected.png",
+             "set_flag": "fp_chest1_already_collected"}
+        """
+        template = action.get("template")
+        if not template:
+            return self._fail(action, "check_template_present requires 'template'")
+
+        templates_to_try = [template]
+        fallback = action.get("fallback_template")
+        if fallback:
+            templates_to_try.append(fallback)
+        templates_to_try.extend(action.get("fallback_templates", []))
+
+        threshold = float(action.get("threshold")) if action.get("threshold") is not None else None
+        screenshot = self.bot.screenshot()
+
+        found = False
+        matched_template = None
+        for tmpl in templates_to_try:
+            path = self._template_path(tmpl)
+            m = self.vision.find_template(screenshot, path, threshold=threshold)
+            conf = m.confidence if m is not None else 0
+            self._log(f"  [check_template_present] '{tmpl}' conf={conf:.3f} found={bool(m)}")
+            if m:
+                found = True
+                matched_template = tmpl
+                break
+
+        if found:
+            return self._ok(action, f"check_template_present: '{matched_template}' found")
+        return ActionResult(status=ActionStatus.SKIPPED, action=action,
+                            message=f"check_template_present: none of {templates_to_try} found")
+
+    def _skip_to_if_flag(self, action: dict) -> ActionResult:
+        """
+        Jump to step 'skip_to' (1-indexed) if the named session flag IS set —
+        the mirror image of skip_to_unless_setting, but keyed on a session flag
+        (set via a previous set_flag/check_template_present) rather than a
+        farm_settings value.
+
+        Required:
+            flag    - session flag name
+            skip_to - 1-indexed step to jump to when the flag is set (truthy)
+
+        Example:
+            {"action": "skip_to_if_flag", "flag": "fp_chest3_already_collected", "skip_to": 25,
+             "note": "All 3 chests already collected — skip straight to the medal chest steps"}
+        """
+        flag_name = action.get("flag")
+        skip_to_step = action.get("skip_to")
+        if not flag_name or skip_to_step is None:
+            return self._fail(action, "skip_to_if_flag requires 'flag' and 'skip_to'")
+
+        if self._flags.get(flag_name):
+            msg = f"skip_to_if_flag: '{flag_name}' is set — jumping to step {skip_to_step}"
+            self._log(f"  [skip_to_if_flag] {msg}")
+            result = self._ok(action, msg)
+            result.skip_to = int(skip_to_step) - 1
+            return result
+
+        return self._ok(action, f"skip_to_if_flag: '{flag_name}' not set — continuing")
+
     def _if_template_tap(self, action: dict) -> ActionResult:
         """
         Tap a template only if it exists. Does NOT fail if template is absent.
@@ -1048,17 +1195,23 @@ class ActionExecutor:
         # Optional secondary verification: when set, find ALL badge matches and pick the
         # first one where verify_template is visible at the specified offset (e.g. GO button).
         # This skips in-progress badges that show a timer instead of GO.
+        # tap_verify_template: true switches the TAP TARGET to the verify match itself
+        # (e.g. a shared "GO" button on the same row as a type-specific icon) instead of
+        # the anchor candidate — the anchor is still what's searched for/scrolled to, but
+        # the actual click lands on the verify template's location.
         verify_template = action.get("verify_template")
         verify_offset_x = int(action.get("verify_offset_x", 0))
         verify_offset_y = int(action.get("verify_offset_y", 0))
         verify_margin_x = int(action.get("verify_margin_x", 60))
         verify_margin_y = int(action.get("verify_margin_y", 25))
         verify_threshold = float(action.get("verify_threshold")) if action.get("verify_threshold") else None
+        tap_verify_template = action.get("tap_verify_template", False)
 
         used_threshold = threshold if threshold is not None else self.vision.confidence_threshold
 
         match = None
         matched_template = None
+        verify_match = None
 
         if verify_template:
             verify_path = self._template_path(verify_template)
@@ -1074,7 +1227,7 @@ class ActionExecutor:
                                      vx + verify_margin_x, vy + verify_margin_y)
                     vm = self.vision.find_template(screenshot, verify_path,
                                                    threshold=verify_threshold, region=verify_region)
-                    vconf = getattr(vm, "confidence", 0) if vm else 0
+                    vconf = vm.confidence if vm is not None else 0
                     if self.log_callback:
                         self.log_callback(
                             f"  [verify] '{verify_template}' at ({vx},{vy}) "
@@ -1083,6 +1236,7 @@ class ActionExecutor:
                     if vm:
                         match = candidate
                         matched_template = tmpl
+                        verify_match = vm
                         break
                 if match:
                     break
@@ -1091,7 +1245,7 @@ class ActionExecutor:
                 path = self._template_path(tmpl)
                 match = self.vision.find_template(screenshot, path, threshold=threshold, region=scan_region)
                 if self.log_callback:
-                    conf = getattr(match, "confidence", 0) if match else 0
+                    conf = match.confidence if match is not None else 0
                     self.log_callback(f"  [if_template_tap] '{tmpl}' conf={conf:.3f} threshold={used_threshold:.3f} found={bool(match)}")
                 if match:
                     matched_template = tmpl
@@ -1106,9 +1260,13 @@ class ActionExecutor:
                 tap_y = int(h * float(zone_y) / 100)
                 default_msg = f"Found '{matched_template}' — tapping zone ({tap_x},{tap_y})"
             else:
-                tap_x = match.x + int(action.get("tap_offset_x", 0))
-                tap_y = match.y + int(action.get("tap_offset_y", 0))
-                default_msg = f"Found and tapped '{matched_template}'"
+                tap_target = verify_match if (tap_verify_template and verify_match is not None) else match
+                tap_x = tap_target.x + int(action.get("tap_offset_x", 0))
+                tap_y = tap_target.y + int(action.get("tap_offset_y", 0))
+                if tap_verify_template and verify_match is not None:
+                    default_msg = f"Found '{matched_template}' — tapped '{verify_template}' on the same row"
+                else:
+                    default_msg = f"Found and tapped '{matched_template}'"
             self._do_tap(tap_x, tap_y)
             msg = action.get("log_success", default_msg)
             if self.log_callback:
@@ -1133,8 +1291,11 @@ class ActionExecutor:
                 if fuel_task_path.exists():
                     try:
                         fuel_task = _json.loads(fuel_task_path.read_text(encoding="utf-8"))
-                        for sub_action in fuel_task.get("actions", []):
-                            self.execute(sub_action)
+                        fuel_actions = fuel_task.get("actions", [])
+                        fi = 0
+                        while fi < len(fuel_actions):
+                            fresult = self.execute(fuel_actions[fi])
+                            fi = fresult.skip_to if fresult.skip_to is not None else fi + 1
                     except Exception as e:
                         if self.log_callback:
                             self.log_callback(f"  ⚠ restore_fuel failed: {e}")
@@ -1911,6 +2072,11 @@ class ActionExecutor:
             return self._ok(action,
                 f"skip_unless_enemy_buster_day: '{setting_path}' is off — shielding regardless of day")
 
+        if self.pre_buster_test_mode:
+            msg = "pre-buster TEST override — treating as Enemy Buster day regardless of real day/time"
+            self._log(f"  🧪 [shield] {msg}")
+            return self._ok(action, msg)
+
         server_date = self._current_server_date()
 
         resolved = resolve_server_day(server_date)
@@ -2094,11 +2260,11 @@ class ActionExecutor:
                 break
 
             # Parse time + theme slots under the header
-            time_m = _re.search(r'\b(\d{2}:\d{2})\b', row_text)
+            time_m = _re.search(r'\b(\d{2})[:.](\d{2})\b', row_text)
             if not time_m:
                 continue
-            slot_time = time_m.group(1)
-            theme_raw = row_text.replace(slot_time, "").strip().lower()
+            slot_time = f"{time_m.group(1)}:{time_m.group(2)}"  # normalize OCR's occasional ':' -> '.' misread
+            theme_raw = row_text.replace(time_m.group(0), "").strip().lower()
             task_name = self._FP_THEME_MAP.get(theme_raw)
             if not task_name:
                 for k, v in self._FP_THEME_MAP.items():
@@ -2218,7 +2384,7 @@ class ActionExecutor:
         def _check():
             ss   = self.bot.screenshot()
             m    = self.vision.find_template(ss, path, threshold=threshold)
-            conf = getattr(m, "confidence", 0) if m else 0
+            conf = m.confidence if m is not None else 0
             self._log(f"  [research] '{selection}' ({tmpl}) conf={conf:.3f} found={bool(m)}")
             return m
 
@@ -2312,7 +2478,7 @@ class ActionExecutor:
         def _check():
             ss   = self.bot.screenshot()
             m    = self.vision.find_template(ss, path, threshold=threshold)
-            conf = getattr(m, "confidence", 0) if m else 0
+            conf = m.confidence if m is not None else 0
             self._log(f"  [setting_tap] '{value}' ({tmpl}) conf={conf:.3f} found={bool(m)}")
             return m
 
@@ -2350,6 +2516,464 @@ class ActionExecutor:
         # decides whether the buy-shield fallbacks run).
         return ActionResult(status=ActionStatus.SKIPPED, action=action,
                             message=f"{msg} — continuing")
+
+    def _skip_to_unless_setting(self, action: dict) -> ActionResult:
+        """
+        Jump to step 'skip_to' (1-indexed) unless the farm-setting at 'setting'
+        (dot-path, e.g. "train_troops.enable_assaulter") matches.
+
+        Lets a JSON task gate a whole block of steps behind a GUI setting —
+        if_flag/if_not_flag only read session flags set via set_flag, they can't
+        see farm_settings directly, so this fills that gap.
+
+        Without 'equals': truthy check (for boolean toggles).
+        With 'equals': string-equality check (for select/dropdown settings where
+        a non-empty value doesn't mean what you want — e.g. a level like "7" is
+        just as truthy as "Promote Troops", so a plain truthy check can't tell
+        them apart).
+
+        Required action fields:
+            setting - dot-path into farm_settings
+            skip_to - 1-indexed step to jump to when the condition isn't met
+
+        Optional:
+            equals  - if set, condition is "setting value == equals" (string
+                      comparison) instead of a plain truthy check
+
+        Example JSON step (boolean toggle):
+            {
+                "action": "skip_to_unless_setting",
+                "setting": "train_troops.enable_assaulter",
+                "skip_to": 6,
+                "note": "Skip the Assaulter block entirely when that toggle is off"
+            }
+
+        Example JSON step (dropdown value):
+            {
+                "action": "skip_to_unless_setting",
+                "setting": "train_troops.assaulter_level",
+                "equals": "Promote Troops",
+                "skip_to": 12,
+                "note": "Only check for a promotable tier if the dropdown is actually set to Promote Troops"
+            }
+        """
+        setting_path = action.get("setting")
+        skip_to_step = action.get("skip_to")
+        if not setting_path or skip_to_step is None:
+            return self._fail(action, "skip_to_unless_setting requires 'setting' and 'skip_to'")
+
+        value = self.farm_settings
+        for key in setting_path.split("."):
+            value = value.get(key) if isinstance(value, dict) else None
+
+        equals = action.get("equals")
+        if equals is not None:
+            condition_met = (str(value) == str(equals))
+            condition_desc = f"equals '{equals}'"
+        else:
+            condition_met = bool(value)
+            condition_desc = "is enabled"
+
+        if condition_met:
+            return self._ok(action, f"skip_to_unless_setting: '{setting_path}' {condition_desc} — continuing")
+
+        msg = f"skip_to_unless_setting: '{setting_path}' does not match ({condition_desc}, actual='{value}') — jumping to step {skip_to_step}"
+        self._log(f"  [skip_to_unless_setting] {msg}")
+        result = self._ok(action, msg)
+        result.skip_to = int(skip_to_step) - 1
+        return result
+
+    def _select_troop_level(self, action: dict) -> ActionResult:
+        """
+        Select a troop level from the horizontally-scrolling level carousel, driven
+        by a farm setting (e.g. "train_troops.assaulter_level").
+
+        Scrolls LEFT first (the carousel this was originally built against opens
+        near the highest tier, and scrolling all the way left lands on tier 1),
+        checking after each scroll. If still not found after max_scrolls, tries
+        scrolling RIGHT instead (up to max_scrolls_right) — a different carousel
+        layout (e.g. one already showing several tiers at once, like the
+        camp-building training screen) may need the opposite direction, or the
+        target tier may simply sit further right than left-scrolling reaches.
+
+        If the setting's value equals 'promote_value' (default "Promote Troops")
+        and 'locked_template' is configured, this uses POSITIVE lock detection:
+        finds every visible match of locked_template (one shared icon, reused
+        across all tiers/types), takes the leftmost one, and taps one
+        tile_spacing_px to its left — i.e. the tile immediately before the
+        first locked tier. This replaced an earlier confidence-only approach
+        (inferring "locked" purely from a numbered template failing to match)
+        after finding a genuinely-unlocked tier can legitimately score below a
+        strict threshold due to capture-source noise, making it indistinguishable
+        from an actually-locked tier — see project memory for 2026-08-06/07.
+        Falls back to the old descending numbered-template scan (below) if no
+        lock is ever found after scrolling both directions (e.g. every tier is
+        already unlocked, so there's nothing to bound against).
+
+        Without 'locked_template', this scans DESCENDING from level 10 down to 1
+        (using only the {value} templates that actually exist on disk) and taps
+        the first/highest one that visually matches, at each scroll position
+        (both directions) — inferring "locked" from a non-match. Kept for
+        backward compatibility and as the no-lock-found fallback above.
+
+        For a specific numeric level, the same not-found-means-locked logic
+        applies but WITHOUT the descending fallback: it deliberately does not
+        drop to a lower level on its own, since silently training a different
+        level than configured could be a surprise.
+
+        Required action fields:
+            setting          - dot-path into farm_settings, e.g. "train_troops.assaulter_level"
+            template_pattern - template filename with a {value} placeholder (digit, e.g.
+                               "btn_assaulter_{value}.png" -> "btn_assaulter_2.png") and/or
+                               a {word} placeholder (word-form, only for levels 1-10, e.g.
+                               "btn_tier_{word}_troop.png" -> "btn_tier_two_troop.png") — use
+                               {word} for templates shared across troop types (generic tier
+                               badges) since the farm setting itself is always a digit string.
+
+        Optional:
+            promote_value     - setting value meaning "find the highest unlocked tier" (default "Promote Troops")
+            promote_max       - highest level to consider when scanning for promote_value (default 10)
+            required          - if True, ABORT_TASK when not found after scrolling both directions (default False)
+            max_scrolls       - scroll-left retries before trying the other direction (default 4 — tiers show ~4 at a time)
+            max_scrolls_right - scroll-right retries after max_scrolls left attempts found nothing (default same as max_scrolls)
+            scroll_x_pct      - X centre of scroll swipe as % of screen width  (default 70)
+            scroll_y_pct      - Y centre of scroll swipe as % of screen height (default 67)
+            distance_pct      - swipe distance as % of screen width            (default 25)
+            duration_ms       - swipe duration in milliseconds                  (default 500)
+            wait_seconds      - pause after each scroll before rechecking       (default 1.2)
+            threshold         - vision confidence override (optional)
+            locked_template   - shared "locked tier" icon filename; enables positive lock
+                                 detection for the promote_value branch (see above)
+            tile_spacing_px   - horizontal distance between adjacent tier slots, used to
+                                 compute the tap position left of the first lock (default 99 —
+                                 measured on the camp-building carousel; recalibrate if a
+                                 different screen/layout uses this)
+            lock_threshold    - vision confidence override for locked_template (optional)
+            max_lock_backtrack - extra tile_spacing_px steps to walk further left if the
+                                 candidate slot is itself still locked, e.g. two locked
+                                 tiers in a row where only the rightmost one's icon cleared
+                                 match threshold (default 5)
+            value_override    - literal value to use INSTEAD of looking up 'setting' in
+                                 farm_settings — for callers that must behave the same
+                                 regardless of a farm's own train_troops configuration
+                                 (e.g. the FP army_expansion flow, which always wants
+                                 Highest Tier for every troop type independent of what
+                                 the farm's regular training settings say). When set,
+                                 'setting' becomes optional and is only used for logging.
+        """
+        import time as _time
+        import os as _os
+
+        _LEVEL_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
+                        6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten"}
+
+        def _resolve_template_name(pattern: str, lvl) -> str:
+            name = pattern.replace("{value}", str(lvl))
+            if "{word}" in name:
+                try:
+                    word = _LEVEL_WORDS[int(lvl)]
+                except (ValueError, KeyError):
+                    word = str(lvl)
+                name = name.replace("{word}", word)
+            return name
+
+        def _with_skip_to(result: ActionResult) -> ActionResult:
+            skip_to_step = action.get("skip_to")
+            if skip_to_step is not None:
+                result.skip_to = int(skip_to_step) - 1
+            return result
+
+        setting_path      = action.get("setting")
+        template_pattern  = action.get("template_pattern")
+        value_override    = action.get("value_override")
+        if (not setting_path and value_override is None) or not template_pattern:
+            return self._fail(action, "select_troop_level requires 'template_pattern' and either 'setting' or 'value_override'")
+
+        if value_override is not None:
+            # Bypasses farm_settings entirely — for callers (e.g. the FP
+            # army_expansion flow) that must behave the same regardless of
+            # what the farm's own train_troops settings say. setting_path is
+            # only used for log messages in this mode, not looked up.
+            value = value_override
+            setting_path = setting_path or "(value_override)"
+        else:
+            value = self.farm_settings
+            for key in setting_path.split("."):
+                value = value.get(key) if isinstance(value, dict) else None
+
+            if value is None:
+                msg = f"select_troop_level: setting '{setting_path}' not configured — skipping"
+                self._log(f"  [select_troop_level] {msg}")
+                return _with_skip_to(self._ok(action, msg))
+
+        required         = action.get("required", False)
+        threshold        = float(action.get("threshold")) if action.get("threshold") is not None else None
+        max_scrolls      = int(action.get("max_scrolls", 4))
+        max_scrolls_right = int(action.get("max_scrolls_right", max_scrolls))
+        scroll_x_pct = float(action.get("scroll_x_pct", 70))
+        scroll_y_pct = float(action.get("scroll_y_pct", 67))
+        distance_pct = float(action.get("distance_pct", 25))
+        duration_ms  = int(action.get("duration_ms", 500))
+        wait_secs    = float(action.get("wait_seconds", 1.2))
+        w, h = self._screen_size()
+        cx   = int(w * scroll_x_pct / 100)
+        cy   = int(h * scroll_y_pct / 100)
+        dist = int(w * distance_pct / 100)
+
+        def _scroll(direction: str):
+            # "left" swipe drags content leftward (finger moves right-to-left is
+            # actually cx+dist for this screen's carousel — kept as originally
+            # validated); "right" is the mirrored swipe.
+            if direction == "left":
+                self.bot.swipe(cx, cy, cx + dist, cy, duration_ms=duration_ms)
+            else:
+                self.bot.swipe(cx, cy, cx - dist, cy, duration_ms=duration_ms)
+            _time.sleep(wait_secs)
+
+        promote_value = action.get("promote_value", "Promote Troops")
+        if str(value) == promote_value:
+            locked_template = action.get("locked_template")
+            if locked_template:
+                tile_spacing_px = int(action.get("tile_spacing_px", 99))
+                lock_threshold  = float(action.get("lock_threshold")) if action.get("lock_threshold") is not None else None
+                locked_path = self._template_path(locked_template)
+
+                def _scan_lock():
+                    ss = self.bot.screenshot()
+                    locks = self.vision.find_all_templates(ss, locked_path, threshold=lock_threshold)
+                    if not locks:
+                        self._log(f"  [select_troop_level] lock scan: no '{locked_template}' matches on screen")
+                        return None
+                    leftmost = min(locks, key=lambda m: m.x)
+                    self._log(f"  [select_troop_level] lock scan: {len(locks)} lock(s) found, "
+                              f"leftmost at ({leftmost.x},{leftmost.y}) conf={leftmost.confidence:.3f}")
+                    return leftmost
+
+                def _slot_is_locked(x: int, y: int, margin: int = 35) -> bool:
+                    ss = self.bot.screenshot()
+                    region = (x - margin, y - margin, x + margin, y + margin)
+                    m = self.vision.find_template(ss, locked_path, threshold=lock_threshold, region=region)
+                    return bool(m)
+
+                def _tap_left_of_lock(lock, note: str):
+                    # Don't assume only one tier is locked — the leftmost detected
+                    # lock isn't necessarily the ONLY one (a neighboring locked
+                    # tier's own icon can render against a different background
+                    # and fall below match threshold without being detected in the
+                    # initial full-screen scan). Walk left, positively re-checking
+                    # each candidate slot, until landing on one that's confirmed
+                    # NOT locked — confirmed live 2026-08-07: Shooter's scan found
+                    # only one lock (tier 10) and tapped tier 9, which was also
+                    # still locked.
+                    max_backtrack = int(action.get("max_lock_backtrack", 5))
+                    tap_x, tap_y = lock.x - tile_spacing_px, lock.y
+                    steps = 0
+                    while steps < max_backtrack and _slot_is_locked(tap_x, tap_y):
+                        self._log(f"  [select_troop_level] lock scan: slot at ({tap_x},{tap_y}) "
+                                  f"is also locked — stepping left")
+                        tap_x -= tile_spacing_px
+                        steps += 1
+                    self.bot.tap(tap_x, tap_y)
+                    return _with_skip_to(self._ok(action,
+                        f"select_troop_level: Highest Tier — tapped tile left of lock at "
+                        f"({lock.x},{lock.y}) -> ({tap_x},{tap_y}){note}"))
+
+                lock = _scan_lock()
+                if lock:
+                    return _tap_left_of_lock(lock, "")
+
+                for i in range(max_scrolls):
+                    if self._stop_event and self._stop_event.is_set():
+                        return ActionResult(status=ActionStatus.SKIPPED, action=action, message="Bot stopped")
+                    self._log(f"  [select_troop_level] lock scan: none found — scrolling left ({i + 1}/{max_scrolls})")
+                    _scroll("left")
+                    lock = _scan_lock()
+                    if lock:
+                        return _tap_left_of_lock(lock, " after scroll left")
+
+                for i in range(max_scrolls_right):
+                    if self._stop_event and self._stop_event.is_set():
+                        return ActionResult(status=ActionStatus.SKIPPED, action=action, message="Bot stopped")
+                    self._log(f"  [select_troop_level] lock scan: still none found — scrolling right ({i + 1}/{max_scrolls_right})")
+                    _scroll("right")
+                    lock = _scan_lock()
+                    if lock:
+                        return _tap_left_of_lock(lock, " after scroll right")
+
+                self._log("  [select_troop_level] lock scan: no lock found anywhere after scrolling "
+                          "both directions — falling back to per-tier confidence scan")
+
+            promote_max = int(action.get("promote_max", 10))
+            candidates = []
+            for lvl in range(promote_max, 0, -1):
+                name = _resolve_template_name(template_pattern, lvl)
+                if _os.path.exists(self._template_path(name)):
+                    candidates.append((lvl, name))
+            if not candidates:
+                msg = (f"select_troop_level: Promote Troops — no level templates on disk "
+                       f"matching pattern '{template_pattern}'")
+                self._log(f"  ✗ {msg}")
+                return _with_skip_to(ActionResult(status=ActionStatus.SKIPPED, action=action, message=msg))
+
+            def _scan():
+                ss = self.bot.screenshot()
+                for lvl, name in candidates:
+                    m = self.vision.find_template(ss, self._template_path(name), threshold=threshold)
+                    conf = m.confidence if m is not None else 0
+                    self._log(f"  [select_troop_level] promote scan: level {lvl} ({name}) "
+                              f"conf={conf:.3f} found={bool(m)}")
+                    if m:
+                        return lvl, m
+                return None, None
+
+            lvl, match = _scan()
+            if match:
+                self.bot.tap(match.x, match.y)
+                return _with_skip_to(self._ok(action, f"select_troop_level: Promote Troops — tapped highest unlocked level {lvl}"))
+
+            for i in range(max_scrolls):
+                if self._stop_event and self._stop_event.is_set():
+                    return ActionResult(status=ActionStatus.SKIPPED, action=action, message="Bot stopped")
+                self._log(f"  [select_troop_level] promote scan: none matched — scrolling left ({i + 1}/{max_scrolls})")
+                _scroll("left")
+                lvl, match = _scan()
+                if match:
+                    self.bot.tap(match.x, match.y)
+                    return _with_skip_to(self._ok(action,
+                        f"select_troop_level: Promote Troops — tapped highest unlocked level {lvl} after scroll left"))
+
+            for i in range(max_scrolls_right):
+                if self._stop_event and self._stop_event.is_set():
+                    return ActionResult(status=ActionStatus.SKIPPED, action=action, message="Bot stopped")
+                self._log(f"  [select_troop_level] promote scan: still none matched — scrolling right ({i + 1}/{max_scrolls_right})")
+                _scroll("right")
+                lvl, match = _scan()
+                if match:
+                    self.bot.tap(match.x, match.y)
+                    return _with_skip_to(self._ok(action,
+                        f"select_troop_level: Promote Troops — tapped highest unlocked level {lvl} after scroll right"))
+
+            msg = (f"select_troop_level: Promote Troops — no unlocked level found among "
+                   f"{[l for l, _ in candidates]} after scrolling both directions")
+            if required:
+                self._log(f"  ✗ {msg} — stopping task")
+                return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+            self._log(f"  [select_troop_level] {msg} — continuing")
+            return _with_skip_to(ActionResult(status=ActionStatus.SKIPPED, action=action, message=msg))
+
+        template_name = _resolve_template_name(template_pattern, value)
+        path = self._template_path(template_name)
+
+        def _check():
+            ss   = self.bot.screenshot()
+            m    = self.vision.find_template(ss, path, threshold=threshold)
+            conf = m.confidence if m is not None else 0
+            self._log(f"  [select_troop_level] '{value}' ({template_name}) conf={conf:.3f} found={bool(m)}")
+            return m
+
+        match = _check()
+        if match:
+            self.bot.tap(match.x, match.y)
+            return _with_skip_to(self._ok(action, f"select_troop_level: tapped level '{value}' (no scroll)"))
+
+        for i in range(max_scrolls):
+            if self._stop_event and self._stop_event.is_set():
+                return ActionResult(status=ActionStatus.SKIPPED, action=action, message="Bot stopped")
+            self._log(f"  [select_troop_level] not found — scrolling left ({i + 1}/{max_scrolls})")
+            _scroll("left")
+            match = _check()
+            if match:
+                self.bot.tap(match.x, match.y)
+                return _with_skip_to(self._ok(action, f"select_troop_level: tapped level '{value}' after scroll left"))
+
+        for i in range(max_scrolls_right):
+            if self._stop_event and self._stop_event.is_set():
+                return ActionResult(status=ActionStatus.SKIPPED, action=action, message="Bot stopped")
+            self._log(f"  [select_troop_level] still not found — scrolling right ({i + 1}/{max_scrolls_right})")
+            _scroll("right")
+            match = _check()
+            if match:
+                self.bot.tap(match.x, match.y)
+                return _with_skip_to(self._ok(action, f"select_troop_level: tapped level '{value}' after scroll right"))
+
+        msg = (f"select_troop_level: level '{value}' ({template_name}) not found after "
+               f"scrolling both directions — may not be unlocked yet")
+        if required:
+            self._log(f"  ✗ {msg} — stopping task")
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
+        self._log(f"  [select_troop_level] {msg} — continuing")
+        return _with_skip_to(ActionResult(status=ActionStatus.SKIPPED, action=action, message=msg))
+
+    def _promote_highest_troop(self, action: dict) -> ActionResult:
+        """
+        Find every visible "promotable" up-arrow indicator in a troop-tier
+        carousel, tap the one furthest right (highest tier — tiers are laid
+        out left-to-right in ascending order, e.g. V, VI, VII, VIII, IX), then
+        tap the Promote confirmation button.
+
+        Multiple tiers can show the arrow at once. Picking by x-position lets
+        one shared arrow template work across every tier and every troop type
+        without needing separate templates per tier — see btn_promote_arrow.png.
+
+        Optional:
+            arrow_template          - up-arrow indicator template (default "btn_promote_arrow.png")
+            promote_button_template - confirm button template (default "btn_promote_troop.png")
+            threshold               - vision confidence override for the arrow search (optional).
+                                      The arrow template is small (~18x19px) — lower this if matches
+                                      are missed at the default confidence.
+            wait_seconds            - pause after tapping the arrow before tapping Promote (default 2.0)
+            required                - if True, ABORT_TASK when no arrow is found (default False —
+                                      "nothing promotable right now" is a normal, expected outcome)
+            log_skip                - message logged when no arrow is found
+            skip_to                 - 1-indexed step to jump to unconditionally once this action
+                                      finishes (found-and-promoted, not-found, or promote-button-missing
+                                      all converge here) — use this to route back to a single shared
+                                      step regardless of outcome
+        """
+        import time as _time
+
+        def _with_skip_to(result: ActionResult) -> ActionResult:
+            skip_to_step = action.get("skip_to")
+            if skip_to_step is not None:
+                result.skip_to = int(skip_to_step) - 1
+            return result
+
+        arrow_template   = action.get("arrow_template", "btn_promote_arrow.png")
+        promote_template = action.get("promote_button_template", "btn_promote_troop.png")
+        threshold        = float(action.get("threshold")) if action.get("threshold") is not None else None
+        wait_secs        = float(action.get("wait_seconds", 2.0))
+        required         = action.get("required", False)
+
+        arrow_path = self._template_path(arrow_template)
+        screenshot = self.bot.screenshot()
+        candidates = self.vision.find_all_templates(screenshot, arrow_path, threshold=threshold)
+
+        if not candidates:
+            skip_msg = action.get("log_skip", f"'{arrow_template}' not found — nothing promotable right now")
+            self._log(f"  [promote_highest_troop] {skip_msg}")
+            if required:
+                return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=skip_msg)
+            return _with_skip_to(ActionResult(status=ActionStatus.SKIPPED, action=action, message=skip_msg))
+
+        best = max(candidates, key=lambda m: m.x)
+        self._log(f"  [promote_highest_troop] {len(candidates)} promotable tier(s) found "
+                  f"at x={[c.x for c in candidates]} — tapping rightmost (highest tier) at ({best.x},{best.y})")
+        self.bot.tap(best.x, best.y)
+        _time.sleep(wait_secs)
+
+        promote_path = self._template_path(promote_template)
+        screenshot2 = self.bot.screenshot()
+        promote_match = self.vision.find_template(screenshot2, promote_path, threshold=threshold)
+        if not promote_match:
+            msg = (f"promote_highest_troop: tapped highest promotable tier, but "
+                   f"'{promote_template}' did not appear afterward")
+            self._log(f"  ✗ {msg}")
+            return _with_skip_to(self._fail(action, msg))
+
+        self.bot.tap(promote_match.x, promote_match.y)
+        return _with_skip_to(self._ok(action,
+            f"promote_highest_troop: promoted highest available tier "
+            f"({len(candidates)} candidate(s) found, tapped rightmost)"))
 
     def _get_estimated_server_time(self) -> tuple | None:
         """
@@ -2478,10 +3102,10 @@ class ActionExecutor:
         if self.log_callback:
             self.log_callback(f"  [fp_event] OCR: '{raw}'")
 
-        time_m = _re.search(r'\b(\d{2}:\d{2})\b', raw)
+        time_m = _re.search(r'\b(\d{2})[:.](\d{2})\b', raw)
         if not time_m:
             return self._fail(action, f"read_current_fp_event: no time in '{raw}'")
-        slot_time  = time_m.group(1)
+        slot_time  = f"{time_m.group(1)}:{time_m.group(2)}"  # normalize OCR's occasional ':' -> '.' misread
         theme_raw  = raw.replace(time_m.group(0), "").strip().lower()
 
         task_name = self._FP_THEME_MAP.get(theme_raw)
@@ -2514,7 +3138,9 @@ class ActionExecutor:
     def _dispatch_fp_task(self, action: dict) -> ActionResult:
         """
         Read the current FP event from fp_current_event.json and run its child task.
-        Warns if the event has expired (re-run check_event_calander to refresh).
+        Skips entirely if the cached event has expired (re-run check_event_calander to
+        refresh) — a stale event no longer matches what's on screen, so running its
+        task blind would just misfire taps against whatever the new event actually shows.
         """
         import json as _json
         from pathlib import Path as _Path
@@ -2535,13 +3161,22 @@ class ActionExecutor:
 
         srv = self._get_estimated_server_time()
         if srv is not None and not self._fp_slot_is_current(slot_time, srv):
+            msg = (f"'{active_task}' at {slot_time} has expired and hasn't been "
+                   f"re-captured yet — skipping all FP tasks this pass")
             if self.log_callback:
-                self.log_callback(
-                    f"  [fp_dispatch] WARNING: '{active_task}' at {slot_time} has expired — "
-                    f"re-run check_event_calander to update")
+                self.log_callback(f"  [fp_dispatch] {msg}")
+            return ActionResult(status=ActionStatus.SKIPPED, action=action,
+                                message=f"dispatch_fp_task: {msg}")
 
         if self.log_callback:
             self.log_callback(f"  [fp_dispatch] slot {slot_time} → '{active_task}'")
+
+        fp_cfg = self.farm_settings.get("full_preparedness", {})
+        if not fp_cfg.get(active_task, True):
+            msg = f"dispatch_fp_task: '{active_task}' disabled in Full Preparedness settings — skipping"
+            if self.log_callback:
+                self.log_callback(f"  [fp_dispatch] {msg}")
+            return ActionResult(status=ActionStatus.SKIPPED, action=action, message=msg)
 
         task_path = get_resource_dir() / "tasks" / f"{active_task}.json"
         if not task_path.exists():
@@ -2554,16 +3189,96 @@ class ActionExecutor:
         except Exception as e:
             return self._fail(action, f"dispatch_fp_task: failed to load {active_task}.json — {e}")
 
-        for sub_action in task_actions:
-            if self._stop_event and self._stop_event.is_set():
-                return ActionResult(status=ActionStatus.SKIPPED, action=action,
-                                    message="Bot stopped")
-            result = self.execute(sub_action)
-            if result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT,
-                                  ActionStatus.ABORT_TASK):
-                return result
+        # fp_reward_collection.json records fp_chest1_claimed/fp_chest2_claimed/fp_chest3_claimed
+        # on its three congrats checks — a flag is True only when a NEW claim was confirmed
+        # on that specific pass. Re-run the event's full action list until a pass claims
+        # nothing new, so a chest that only unlocks after another round of progress still
+        # gets collected, while every pass always runs to completion (including the medal
+        # chest steps) before we decide whether to loop again.
+        chest_flag_names = ["fp_chest1_claimed", "fp_chest2_claimed", "fp_chest3_claimed"]
+        max_iterations   = int(action.get("max_iterations", 5))
+        ever_claimed     = [False] * len(chest_flag_names)
 
-        return self._ok(action, f"dispatch_fp_task: '{active_task}' (slot {slot_time}) complete")
+        for iteration in range(max_iterations):
+            if iteration > 0 and self.log_callback:
+                self.log_callback(
+                    f"  [fp_dispatch] chest progress detected — retrying '{active_task}' "
+                    f"(pass {iteration + 1}/{max_iterations})")
+
+            for name in chest_flag_names:
+                self._flags[name] = False
+
+            any_new_this_pass = False
+            si = 0
+            while si < len(task_actions):
+                if self._stop_event and self._stop_event.is_set():
+                    return ActionResult(status=ActionStatus.SKIPPED, action=action,
+                                        message="Bot stopped")
+                result = self.execute(task_actions[si])
+                if result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT,
+                                      ActionStatus.ABORT_TASK):
+                    return result
+                # Snapshot chest flags after every sub-action, not just once at
+                # the end — some event tasks (e.g. shelter_upgrade.json) run
+                # fp_reward_collection.json a second time within this same pass
+                # to retry a chest that hadn't unlocked yet. That second run
+                # re-checks chests 1/2 too and resets their flags to False when
+                # there's nothing new to claim, which would otherwise clobber a
+                # real claim already confirmed earlier in this same pass.
+                for i, name in enumerate(chest_flag_names):
+                    if self._flags.get(name):
+                        ever_claimed[i] = True
+                        any_new_this_pass = True
+                si = result.skip_to if result.skip_to is not None else si + 1
+
+            if not any_new_this_pass:
+                break
+
+        claimed_count = sum(ever_claimed)
+        self._record_fp_chest_progress(active_task, claimed_count, len(chest_flag_names))
+        if self.log_callback:
+            self.log_callback(
+                f"  [fp_dispatch] '{active_task}' chest progress: "
+                f"{claimed_count}/{len(chest_flag_names)}")
+
+        return self._ok(action,
+            f"dispatch_fp_task: '{active_task}' (slot {slot_time}) complete — "
+            f"{claimed_count}/{len(chest_flag_names)} chests")
+
+    def _record_fp_chest_progress(self, event_name: str, claimed: int, total: int):
+        """
+        Persist how many of an FP event's numbered chests were claimed today,
+        keyed by <port>_<server_date>_<event_name>, so Farm Stats can show a
+        quick 'claimed/total' readout without re-deriving it from raw logs.
+        """
+        import json as _json
+        from pathlib import Path as _Path
+        from datetime import date as _date, datetime as _dt
+
+        server_date = self._current_server_date() or str(_date.today())
+        port = getattr(self.bot, "port", 0)
+        key  = f"{port}_{server_date}_{event_name}"
+
+        path = _Path("logs/fp_chest_progress.json")
+        data: dict = {}
+        if path.exists():
+            try:
+                data = _json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+
+        data[key] = {
+            "event":      event_name,
+            "claimed":    claimed,
+            "total":      total,
+            "port":       port,
+            "date":       server_date,
+            "updated_at": _dt.now().isoformat(timespec="seconds"),
+        }
+        try:
+            path.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     def _loop_until_template(self, action: dict) -> ActionResult:
         """
@@ -2604,7 +3319,7 @@ class ActionExecutor:
                 path = self._template_path(tmpl)
                 match = self.vision.find_template(screenshot, path, threshold=threshold)
                 if self.log_callback:
-                    conf = getattr(match, "confidence", 0) if match else 0
+                    conf = match.confidence if match is not None else 0
                     self.log_callback(f"  [loop_until_template] done-check '{tmpl}' conf={conf:.3f} found={bool(match)}")
                 if match:
                     return self._ok(action, f"Done — '{tmpl}' found after {iteration} iteration(s)")
@@ -2618,6 +3333,11 @@ class ActionExecutor:
                 if self._stop_event and self._stop_event.is_set():
                     return self._ok(action, f"loop_until_template: stop requested mid-iteration {iteration + 1}")
                 sub_result = self.execute(sub)
+                if (sub_result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
+                        and self._is_device_disconnect(sub_result.message)):
+                    self._log(f"  ⚠ [loop_until_template]: device disconnect detected mid-iteration "
+                              f"— bailing out so the engine can reconnect")
+                    return sub_result
                 if sub_result.status == ActionStatus.ABORT_TASK:
                     return sub_result
 
@@ -2659,7 +3379,7 @@ class ActionExecutor:
             screenshot = self.bot.screenshot()
             path  = self._template_path(template)
             match = self.vision.find_template(screenshot, path, threshold=threshold)
-            conf  = getattr(match, "confidence", 0) if match else 0
+            conf  = match.confidence if match is not None else 0
             self.log_callback and self.log_callback(
                 f"  [loop_while_template] iter {iteration + 1}/{max_iter} — '{template}' conf={conf:.3f} found={bool(match)}")
 
@@ -2670,6 +3390,11 @@ class ActionExecutor:
                 if self._stop_event and self._stop_event.is_set():
                     return self._ok(action, f"loop_while_template: stop requested mid-iteration {iteration + 1}")
                 sub_result = self.execute(sub)
+                if (sub_result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
+                        and self._is_device_disconnect(sub_result.message)):
+                    self._log(f"  ⚠ [loop_while_template]: device disconnect detected mid-iteration "
+                              f"— bailing out so the engine can reconnect")
+                    return sub_result
                 if sub_result.status == ActionStatus.ABORT_TASK:
                     return sub_result
 
@@ -2733,7 +3458,7 @@ class ActionExecutor:
             for tmpl_name in allowed_templates:
                 path  = self._template_path(tmpl_name)
                 match = self.vision.find_template(screenshot, path, threshold=0.85)
-                conf  = getattr(match, "confidence", 0) if match else 0
+                conf  = match.confidence if match is not None else 0
                 self.log_callback and self.log_callback(
                     f"  [check_truck_quality] '{tmpl_name}' conf={conf:.3f} found={bool(match)}")
                 if match:
@@ -3315,8 +4040,11 @@ class ActionExecutor:
                     break
 
         _return_home()
-        return self._ok(action,
-            f"execute_truck_attack: no target found after {max_attempts} cycle(s)")
+        return ActionResult(
+            status=ActionStatus.ABORT_TASK,
+            action=action,
+            message=f"execute_truck_attack: no target found after {max_attempts} cycle(s)",
+        )
 
     def _loop_task(self, action: dict) -> ActionResult:
         """
@@ -3356,13 +4084,20 @@ class ActionExecutor:
                 self.log_callback(f"  [loop_task] '{task_name}' — attempt {i + 1}/{max_iter}")
 
             aborted = False
-            for sub_action in task_actions:
+            si = 0
+            while si < len(task_actions):
                 if self._stop_event and self._stop_event.is_set():
                     return self._ok(action, f"loop_task: stopped at attempt {i + 1}")
-                result = self.execute(sub_action)
+                result = self.execute(task_actions[si])
+                if (result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
+                        and self._is_device_disconnect(result.message)):
+                    self._log(f"  ⚠ [loop_task] '{task_name}': device disconnect detected mid-sub-task "
+                              f"— bailing out so the engine can reconnect instead of re-failing every remaining step")
+                    return result
                 if result.status == ActionStatus.ABORT_TASK:
                     aborted = True
                     break
+                si = result.skip_to if result.skip_to is not None else si + 1
 
             if aborted:
                 if self.log_callback:
@@ -3417,16 +4152,23 @@ class ActionExecutor:
         if self.log_callback:
             self.log_callback(f"  [run_task] running '{task_name}' ({len(task_actions)} action(s))")
 
-        for sub_action in task_actions:
+        si = 0
+        while si < len(task_actions):
             if self._stop_event and self._stop_event.is_set():
                 break
-            result = self.execute(sub_action)
+            result = self.execute(task_actions[si])
+            if (result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
+                    and self._is_device_disconnect(result.message)):
+                self._log(f"  ⚠ [run_task] '{task_name}': device disconnect detected mid-sub-task "
+                          f"— bailing out so the engine can reconnect instead of re-failing every remaining step")
+                return result
             if result.status == ActionStatus.ABORT_TASK:
                 if action.get("contain_abort"):
                     msg = f"'{task_name}' backed out: {result.message}"
                     self._log(f"  ⏭ [run_task] {msg} — continuing parent task")
                     return ActionResult(status=ActionStatus.SKIPPED, action=action, message=msg)
                 return result
+            si = result.skip_to if result.skip_to is not None else si + 1
 
         return self._ok(action, f"run_task: '{task_name}' complete")
 
@@ -3480,12 +4222,14 @@ class ActionExecutor:
             self.log_callback(
                 f"  [run_task_if_template] '{template}' matched — running '{task_name}'")
 
-        for sub_action in task_actions:
+        si = 0
+        while si < len(task_actions):
             if self._stop_event and self._stop_event.is_set():
                 return ActionResult(status=ActionStatus.SKIPPED, action=action, message="Bot stopped")
-            result = self.execute(sub_action)
+            result = self.execute(task_actions[si])
             if result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT, ActionStatus.ABORT_TASK):
                 return result
+            si = result.skip_to if result.skip_to is not None else si + 1
 
         return self._ok(action, f"run_task_if_template: '{task_name}' complete")
 
@@ -3716,11 +4460,14 @@ class ActionExecutor:
                                    f"'{template}' not found after scrolling — skipping task")
 
         path = self._template_path(template)
+        last_ss = None
 
         def _check():
+            nonlocal last_ss
             ss   = self.bot.screenshot()
+            last_ss = ss
             m    = self.vision.find_template(ss, path, threshold=threshold)
-            conf = getattr(m, "confidence", 0) if m else 0
+            conf = m.confidence if m is not None else 0
             self._log(f"  [find_template_with_scroll] '{template}' conf={conf:.3f} found={bool(m)}")
             return m
 
@@ -3755,6 +4502,8 @@ class ActionExecutor:
             return self._ok(action, f"Found and tapped '{template}' after scroll left")
 
         # ── Not found after both scrolls ─────────────────────────────────
+        if last_ss is not None:
+            self._check_frozen_screen(last_ss, f"find_template_with_scroll: '{template}'")
         self._log(f"  ⚠ {not_found_msg}")
         return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=not_found_msg)
 
@@ -3762,23 +4511,43 @@ class ActionExecutor:
         """
         Search for a template across the full HQ view using a 5-scroll sweep:
         down → left → up → right → down. Taps it if found at any point.
-        If not found after all scrolls, logs a warning and continues (never aborts task).
+        If not found after all scrolls: logs a warning and continues (default),
+        or ABORT_TASKs when 'required' is set — use that for prerequisites the
+        rest of the task can't proceed without (e.g. a building that must be
+        located and entered before anything downstream makes sense).
 
         Parameters
         ----------
-        template       : template filename to search for and tap (required)
+        template            : template filename to search for and tap (required)
+        fallback_template   : single fallback template, tried at the same scroll positions
+        fallback_templates  : list of fallback templates, tried in order after the primary
+                              (both forms combine — same convention as if_template_tap)
         scroll_x_pct   : X centre of scroll swipe as % of screen width  (default 50)
         scroll_y_pct   : Y centre of scroll swipe as % of screen height (default 50)
         distance_pct   : swipe distance as % of screen dimension        (default 40)
         duration_ms    : swipe duration in milliseconds                  (default 500)
         wait_seconds   : pause after each scroll before rechecking       (default 1.5)
         threshold      : vision confidence override (optional)
+        required       : if True, ABORT_TASK instead of skipping when not found (default False)
+        skip_to_on_found : 1-indexed step number to jump to when found (same convention as if_template_tap)
+        skip_to_on_not_found : 1-indexed step number to jump to when NOT found after the full sweep
+                              (e.g. to bail out to whatever comes after a repeat-until-empty block
+                              instead of wasting more scroll passes once one comes up empty)
+
+        Returns SKIPPED (not SUCCESS) when not found and 'required' is false — same convention
+        if_template_tap/check_template_present use, so 'set_flag' correctly records found/not-found.
         """
         import time as _time
 
         template = action.get("template")
         if not template:
             return self._fail(action, "tap_template_search requires 'template'")
+
+        templates_to_try = [template]
+        fallback = action.get("fallback_template")
+        if fallback:
+            templates_to_try.append(fallback)
+        templates_to_try.extend(action.get("fallback_templates", []))
 
         threshold      = float(action.get("threshold")) if action.get("threshold") is not None else None
         scroll_x_pct   = float(action.get("scroll_x_pct", 50))
@@ -3788,16 +4557,23 @@ class ActionExecutor:
         duration_ms    = int(action.get("duration_ms", 500))
         wait_secs      = float(action.get("wait_seconds", 1.5))
         ignore_top_pct = float(action.get("ignore_top_pct", 0))
+        required       = action.get("required", False)
 
-        path = self._template_path(template)
+        paths = [(tmpl, self._template_path(tmpl)) for tmpl in templates_to_try]
+        last_ss = None
 
         def _check():
+            nonlocal last_ss
             ss   = self.bot.screenshot()
+            last_ss = ss
             w, h = ss.size
             region = (0, int(h * ignore_top_pct / 100), w, h) if ignore_top_pct > 0 else None
-            m = self.vision.find_template(ss, path, threshold=threshold, region=region)
-            self._log(f"  [tap_template_search] '{template}' found={bool(m)}")
-            return m
+            for tmpl, path in paths:
+                m = self.vision.find_template(ss, path, threshold=threshold, region=region)
+                self._log(f"  [tap_template_search] '{tmpl}' found={bool(m)}")
+                if m:
+                    return tmpl, m
+            return None, None
 
         def _scroll(direction):
             w, h = self._screen_size()
@@ -3815,22 +4591,39 @@ class ActionExecutor:
                 self.bot.swipe(cx, cy, cx - dx, cy, duration_ms=duration_ms)
             _time.sleep(wait_secs)
 
+        def _found_result(matched_template, direction_note):
+            result = self._ok(action, f"tap_template_search: '{matched_template}' {direction_note}")
+            skip_to_step = action.get("skip_to_on_found")
+            if skip_to_step is not None:
+                result.skip_to = int(skip_to_step) - 1
+            return result
+
         # Initial check — no scroll yet
-        match = _check()
+        matched_template, match = _check()
         if match:
             self.bot.tap(match.x, match.y)
-            return self._ok(action, f"tap_template_search: '{template}' found (no scroll)")
+            return _found_result(matched_template, "found (no scroll)")
 
-        for direction in ("left", "left", "up", "right", "right", "right", "right", "down", "left", "left", "left"):
+        for direction in ("left", "left", "up", "right", "right", "right", "right", "down", "left", "down", "left", "left"):
             self._log(f"  [tap_template_search] not found — scrolling {direction}")
             _scroll(direction)
-            match = _check()
+            matched_template, match = _check()
             if match:
                 self.bot.tap(match.x, match.y)
-                return self._ok(action, f"tap_template_search: '{template}' found after scroll {direction}")
+                return _found_result(matched_template, f"found after scroll {direction}")
 
-        self._log(f"  [tap_template_search] '{template}' not found after full search — skipping")
-        return self._ok(action, f"tap_template_search: '{template}' not found, skipped")
+        msg = f"tap_template_search: none of {templates_to_try} found after full search"
+        if last_ss is not None:
+            self._check_frozen_screen(last_ss, f"tap_template_search: '{template}'")
+        if required:
+            self._log(f"  ✗ {msg} — stopping task")
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=f"{msg} — stopping task")
+        self._log(f"  [tap_template_search] {msg} — skipping")
+        result = ActionResult(status=ActionStatus.SKIPPED, action=action, message=f"{msg}, skipped")
+        skip_to_step = action.get("skip_to_on_not_found")
+        if skip_to_step is not None:
+            result.skip_to = int(skip_to_step) - 1
+        return result
 
     def _tap_template_or_template(self, action: dict) -> ActionResult:
         """
@@ -3935,7 +4728,7 @@ class ActionExecutor:
             for tpl in templates:
                 path  = self._template_path(tpl)
                 match = self.vision.find_template(screenshot, path, threshold=threshold)
-                conf  = getattr(match, "confidence", 0) if match else 0
+                conf  = match.confidence if match is not None else 0
                 self._log(f"  [tap_first_found] '{tpl}' conf={conf:.3f} found={bool(match)}")
                 if match:
                     self._log(f"  [tap_first_found] tapping at ({match.x}, {match.y})")
@@ -3995,7 +4788,7 @@ class ActionExecutor:
         if locked_template and active_slots:
             path  = self._template_path(locked_template)
             match = self.vision.find_template(screenshot, path, threshold=threshold)
-            conf  = getattr(match, "confidence", 0) if match else 0
+            conf  = match.confidence if match is not None else 0
             self._log(f"  [tap_free_formation] '{locked_template}' conf={conf:.3f} found={bool(match)}")
             if match:
                 active_slots = active_slots[:-1]
@@ -4098,6 +4891,11 @@ class ActionExecutor:
                 if self._stop_event and self._stop_event.is_set():
                     break
                 sub_result = self.execute(sub)
+                if (sub_result.status in (ActionStatus.FAILED, ActionStatus.TIMEOUT)
+                        and self._is_device_disconnect(sub_result.message)):
+                    self._log(f"  ⚠ [repeat_if_template]: device disconnect detected mid-iteration "
+                              f"— bailing out so the engine can reconnect")
+                    return sub_result
                 if sub_result.status == ActionStatus.ABORT_TASK:
                     return sub_result
 
@@ -4128,7 +4926,7 @@ class ActionExecutor:
         screenshot = self.bot.screenshot()
         path  = self._template_path(template)
         match = self.vision.find_template(screenshot, path, threshold=threshold)
-        conf  = getattr(match, "confidence", 0) if match else 0
+        conf  = match.confidence if match is not None else 0
         self._log(f"  [long_press_template] '{template}' conf={conf:.3f} found={bool(match)}")
 
         if match:
@@ -4221,7 +5019,7 @@ class ActionExecutor:
         # ── Try template first ───────────────────────────────────────────
         path  = self._template_path(template)
         match = self.vision.find_template(screenshot, path, threshold=threshold)
-        conf  = getattr(match, "confidence", 0) if match else 0
+        conf  = match.confidence if match is not None else 0
         self._log(f"  [tap_template_or_ocr_pattern] '{template}' conf={conf:.3f} found={bool(match)}")
         if match:
             self.bot.tap(match.x, match.y)
@@ -4331,7 +5129,7 @@ class ActionExecutor:
         screenshot = self.bot.screenshot()
         match = self.vision.find_template(screenshot, path, threshold=threshold)
 
-        conf = match.confidence if match else 0.0
+        conf = match.confidence if match is not None else 0.0
         self._log(f"  [verify_setting_template] '{template_name}' conf={conf:.3f} found={bool(match)}")
 
         if match:
@@ -4758,7 +5556,7 @@ class ActionExecutor:
                 tpl_name = template_pattern.replace("{value}", str(lvl))
                 path  = self._template_path(tpl_name)
                 match = self.vision.find_template(screenshot, path, region=region)
-                conf  = getattr(match, "confidence", 0) if match else 0
+                conf  = match.confidence if match is not None else 0
                 if conf > best_conf:
                     best_conf, best_level = conf, lvl
             if best_level is not None:
@@ -4859,7 +5657,7 @@ class ActionExecutor:
             for lvl in range(min_level, max_level + 1):
                 tpl_name = tpl_pattern.replace("{value}", str(lvl))
                 match = self.vision.find_template(screenshot, self._template_path(tpl_name), region=region)
-                conf = getattr(match, "confidence", 0) if match else 0
+                conf = match.confidence if match is not None else 0
                 if conf > best_conf:
                     best_conf, best_level = conf, lvl
             if best_level is not None:
@@ -4980,12 +5778,18 @@ class ActionExecutor:
         """
         Check the daily rally counter for this farm — does NOT increment.
 
-        Reads logs/rally_counts.json keyed by "<port>_<YYYY-MM-DD>".
-        If the count has reached rally.max_rallies_per_day → ABORT_TASK.
-        Otherwise returns SUCCESS so the task continues.
+        Reads logs/rally_counts.json keyed by "<port>_<YYYY-MM-DD>", or
+        "<port>_<YYYY-MM-DD>_<counter_key>" when 'counter_key' is set — use a
+        distinct counter_key (e.g. "fp_mod_vehicle") to give an event its own
+        dedicated daily rally budget instead of sharing the regular daily-task
+        rally pool, so unrelated rallying earlier in the day can't starve it.
+        If the count has reached rally.max_rallies_per_day (or the inline
+        'max_rallies' override) → ABORT_TASK. Otherwise returns SUCCESS so the
+        task continues.
 
         The counter is only incremented by rally_count_record, which should
-        be placed after a march is actually confirmed (btn_march_on_boomer tapped).
+        be placed after a march is actually confirmed (btn_march_on_boomer tapped)
+        — pass the same 'counter_key' there so check/record agree on the bucket.
 
         farm_settings must contain {"rally": {"max_rallies_per_day": N}}.
         """
@@ -4998,9 +5802,10 @@ class ActionExecutor:
         # Inline override takes priority — used by event tasks that need a higher limit
         max_rallies  = int(action["max_rallies"]) if "max_rallies" in action else farm_max
 
-        port  = getattr(self.bot, "port", 0)
-        today = str(date.today())
-        key   = f"{port}_{today}"
+        port        = getattr(self.bot, "port", 0)
+        today       = self._current_server_date() or str(date.today())
+        counter_key = action.get("counter_key")
+        key         = f"{port}_{today}_{counter_key}" if counter_key else f"{port}_{today}"
 
         counts_path = Path("logs/rally_counts.json")
         counts: dict = {}
@@ -5012,13 +5817,14 @@ class ActionExecutor:
                 counts = {}
 
         current = counts.get(key, 0)
+        label = f" [{counter_key}]" if counter_key else ""
 
         if current >= max_rallies:
-            msg = f"Rally limit reached ({current}/{max_rallies}) for today — skipping"
+            msg = f"Rally limit reached ({current}/{max_rallies}) for today{label} — skipping"
             self._log(f"  ⏭ {msg}")
             return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
 
-        msg = f"Rally count {current}/{max_rallies} — proceeding"
+        msg = f"Rally count {current}/{max_rallies}{label} — proceeding"
         self._log(f"  ✓ {msg}")
         return self._ok(action, msg)
 
@@ -5028,18 +5834,22 @@ class ActionExecutor:
 
         Call this only after a march has been successfully sent (i.e. after
         btn_march_on_boomer is confirmed tapped). Reads/writes
-        logs/rally_counts.json keyed by "<port>_<YYYY-MM-DD>".
+        logs/rally_counts.json keyed by "<port>_<YYYY-MM-DD>", or
+        "<port>_<YYYY-MM-DD>_<counter_key>" when 'counter_key' is set — must
+        match whatever rally_count_check used so they share the same bucket.
         """
         import json as _json
         from pathlib import Path
         from datetime import date
 
         rally_cfg   = self.farm_settings.get("rally", {})
-        max_rallies = int(rally_cfg.get("max_rallies_per_day", 999))
+        farm_max    = int(rally_cfg.get("max_rallies_per_day", 999))
+        max_rallies = int(action["max_rallies"]) if "max_rallies" in action else farm_max
 
-        port  = getattr(self.bot, "port", 0)
-        today = str(date.today())
-        key   = f"{port}_{today}"
+        port        = getattr(self.bot, "port", 0)
+        today       = self._current_server_date() or str(date.today())
+        counter_key = action.get("counter_key")
+        key         = f"{port}_{today}_{counter_key}" if counter_key else f"{port}_{today}"
 
         counts_path = Path("logs/rally_counts.json")
         counts: dict = {}
@@ -5055,7 +5865,8 @@ class ActionExecutor:
         with open(counts_path, "w") as f:
             _json.dump(counts, f, indent=2)
 
-        msg = f"Rally recorded: {counts[key]}/{max_rallies} sent today"
+        label = f" [{counter_key}]" if counter_key else ""
+        msg = f"Rally recorded: {counts[key]}/{max_rallies}{label} sent today"
         self._log(f"  ✓ {msg}")
         return self._ok(action, msg)
 

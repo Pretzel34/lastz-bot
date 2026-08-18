@@ -2,8 +2,144 @@
   "name": "shelter_upgrade",
   "actions": [
     {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "note": "Guarantee HQ view before touching the build icon — the previous task may have left the game on a different screen"
+    },
+    {
       "action": "wait",
-      "seconds": 2.0
+      "seconds": 4.0
+    },
+    {
+      "action": "run_task",
+      "task": "start_build.json",
+      "contain_abort": true,
+      "note": "Ensure something is actually building before the rest of this task tries to collect/speed it up — shelter_upgrade previously had no guarantee a build was in progress at all. start_build.json loops until nothing idle is left to start (finish-now, initiate-build, or speed-up-only cases), same task used elsewhere for this purpose. contain_abort is required: start_build.json's own ABORT_TASK returns are written as a graceful 'nothing left to do' signal for when it runs as a TOP-LEVEL task (bot_engine.py treats ABORT_TASK that way) — nested via run_task, an uncontained ABORT_TASK instead kills the whole parent task (confirmed live 2026-08-11: this exact thing happened and silently prevented shelter_upgrade.json from ever reaching its own speed-up steps below)."
+    },
+    {
+      "action": "run_task",
+      "task": "complete_collect_build.json",
+      "note": "Collect any already-finished building before starting/speeding a new upgrade — an uncollected completion can affect FP reward availability below"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_build_icon.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_finish_now.png",
+      "required": false,
+      "set_flag": "finish_now_found",
+      "log_success": "Finish Now found — claiming free finish",
+      "log_skip": "No Finish Now — checking for speed-up prompt"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_finish_congrats.png",
+      "if_flag": "finish_now_found",
+      "required": false,
+      "skip_to_on_found": 4,
+      "log_success": "Building finished — jumping back to build icon to check for another",
+      "note": "Finish Now + this congrats popup means we're outside the upgrade view entirely (not looking at a speed-up prompt) — go re-tap the build icon instead of falling through to speed-up steps"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_speed_up.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_use_research_speed_up.png",
+      "required": false,
+      "note": "Confirm using the speed-up item — btn_speed_up.png only opens the item picker, this taps 'Use' on it"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_speed_up.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_use_research_speed_up.png",
+      "required": false,
+      "note": "Confirm using the speed-up item — second pass"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_exit_purchase.png",
+      "required": false,
+      "note": "Step 12: close any leftover speed-up purchase prompt before collecting rewards"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_exit_purchase.png",
+      "required": false,
+      "note": "Sometimes a second purchase/confirmation popup stacks on top of the first — try exit again before moving on"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "required": false,
+      "log_skip": "No back button found — could not back out of the building panel",
+      "note": "Back out of the building detail panel (closing the purchase popup above doesn't leave the FP/HQ view) before collecting rewards — same pattern start_build.json/hero_progression.json use"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "run_task",
+      "task": "fp_reward_collection.json",
+      "note": "Claim any FP rewards unlocked by the upgrade above — same pattern hero_progression.json/age_of_science.json use"
+    },
+    {
+      "action": "run_task",
+      "task": "fp_reward_collection.json",
+      "if_not_flag": "fp_chest3_claimed",
+      "note": "Chest 3 wasn't claimed on the first pass — try once more before finishing"
     }
   ]
 }

@@ -14,11 +14,20 @@
       ],
       "on_not_found": [
         {
-          "action": "tap_template_or_zone",
+          "action": "if_template_tap",
           "template": "btn_go_to_hq_view_universal.png",
-          "x_pct": 90.9,
-          "y_pct": 95.3,
           "required": false
+        },
+        {
+          "action": "tap_first_found",
+          "templates": [
+            "btn_back.png",
+            "btn_back_out_of_page.png",
+            "btn_press_back.png",
+            "btn_hero_back.png"
+          ],
+          "required": false,
+          "log_skip": "No back button found — could not back out to HQ view"
         }
       ]
     },
@@ -133,11 +142,20 @@
       "seconds": 4.0
     },
     {
-      "action": "tap_template_or_zone",
+      "action": "if_template_tap",
       "template": "btn_go_to_hq_view_universal.png",
-      "x_pct": 90.9,
-      "y_pct": 95.3,
       "required": false
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "required": false,
+      "log_skip": "No back button found — could not back out to HQ view"
     },
     {
       "action": "wait",

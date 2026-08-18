@@ -9,7 +9,9 @@
       "action": "tap_first_found",
       "templates": [
         "btn_board_time.png",
-        "btn_board_time_alt.png"
+        "btn_board_time_alt.png",
+        "btn_board_time_alt_1.png",
+        "btn_board_time_alt_2.png"
       ],
       "required": true,
       "note": "Open the Apocalypse Time panel"

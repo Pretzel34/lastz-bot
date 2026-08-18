@@ -1,0 +1,333 @@
+{
+  "name": "train_troops_alt",
+  "actions": [
+    {
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "note": "Guarantee HQ view before anything else — same as train_troops.json"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Nav to world view — first half of the center-camera round trip, same pattern as collect_building_resource.json"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_headquarters.png",
+      "required": false,
+      "note": "Back to HQ view, now centered — do this before any scroll-based search below"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "skip_to_unless_setting",
+      "setting": "train_troops.enable_assaulter",
+      "skip_to": 18,
+      "note": "Assaulter disabled in settings — skip to the Rider check"
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_assaulter_camp.png",
+      "fallback_template": "btn_assaulter_camp_alt.png",
+      "required": false,
+      "note": "Full-sweep HQ search for the Assaulter Camp building — highest priority per settings order"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "note": "Settle after entering the building before checking for the training-tab icon"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_assaulter_icon.png",
+      "fallback_templates": [
+        "btn_train_rider_icon.png",
+        "btn_train_shooter_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 36,
+      "note": "Icon that opens the Assaulter training tab (also accepts the Rider/Shooter icon as a fallback in case a different one is visible) — found means Assaulter is fully located and entered, jump to the Assaulter promote-gate"
+    },
+    {
+      "action": "scroll_down",
+      "note": "None of the 3 training icons found on the first check — scroll down once and retry before giving up on this building"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_assaulter_icon.png",
+      "fallback_templates": [
+        "btn_train_rider_icon.png",
+        "btn_train_shooter_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 36,
+      "note": "Retry the same check after one scroll down"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Still not found after scrolling — recenter camera before the Rider search, same round trip as the start of this task. Only reached because the icon check above didn't skip past it."
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_headquarters.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "skip_to_unless_setting",
+      "setting": "train_troops.enable_rider",
+      "skip_to": 29,
+      "note": "Rider disabled in settings — skip to the Shooter check"
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_rider_camp.png",
+      "fallback_template": "btn_rider_camp_alt.png",
+      "required": false,
+      "note": "Only reached if Assaulter was disabled or not found"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_rider_icon.png",
+      "fallback_templates": [
+        "btn_train_assaulter_icon.png",
+        "btn_train_shooter_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 40,
+      "note": "Icon that opens the Rider training tab (also accepts Assaulter/Shooter as fallback)"
+    },
+    {
+      "action": "scroll_down",
+      "note": "None of the 3 training icons found on the first check — scroll down once and retry"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_rider_icon.png",
+      "fallback_templates": [
+        "btn_train_assaulter_icon.png",
+        "btn_train_shooter_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 40,
+      "note": "Retry the same check after one scroll down"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_world.png",
+      "required": false,
+      "note": "Still not found after scrolling — recenter camera before the Shooter search, same as after Assaulter above"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_headquarters.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "skip_to_unless_setting",
+      "setting": "train_troops.enable_shooter",
+      "skip_to": 48,
+      "note": "Shooter disabled in settings — nothing enabled was found, skip straight to the final stop"
+    },
+    {
+      "action": "tap_template_search",
+      "template": "btn_shooter_camp.png",
+      "fallback_template": "btn_shooter_camp_alt.png",
+      "required": false,
+      "note": "Last priority type — no skip_to_on_found needed on the building search itself"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_shooter_icon.png",
+      "fallback_templates": [
+        "btn_train_assaulter_icon.png",
+        "btn_train_rider_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 44,
+      "note": "Icon that opens the Shooter training tab (also accepts Assaulter/Rider as fallback)"
+    },
+    {
+      "action": "scroll_down",
+      "note": "None of the 3 training icons found on the first check — scroll down once and retry"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_train_shooter_icon.png",
+      "fallback_templates": [
+        "btn_train_assaulter_icon.png",
+        "btn_train_rider_icon.png"
+      ],
+      "required": false,
+      "skip_to_on_found": 44,
+      "note": "Retry after one scroll down. If STILL not found, nothing was located for any of the 3 types — end the task here (no recenter needed, nothing left to search for).",
+      "skip_task_if_not_found": true
+    },
+    {
+      "action": "skip_to_unless_setting",
+      "setting": "train_troops.assaulter_level",
+      "equals": "Promote Troops",
+      "skip_to": 39,
+      "note": "Assaulter's dropdown is set to a specific level, not Promote Troops — go select that level instead of checking for a promotable tier"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0,
+      "note": "Settle before checking for a promotable tier — only reached when assaulter_level == Promote Troops"
+    },
+    {
+      "action": "promote_highest_troop",
+      "required": false,
+      "skip_to": 48,
+      "note": "Finds every tier showing the green up-arrow, taps the rightmost/highest one, then taps btn_promote_troop.png to confirm. Jumps to the final stop regardless of outcome."
+    },
+    {
+      "action": "select_troop_level",
+      "setting": "train_troops.assaulter_level",
+      "template_pattern": "btn_tier_assaulter_{word}_troop.png",
+      "promote_value": "Highest Tier",
+      "locked_template": "btn_locked_tier_universal.png",
+      "tile_spacing_px": 99,
+      "required": false,
+      "skip_to": 48,
+      "threshold": 0.9,
+      "scroll_y_pct": 81,
+      "note": "Per-type tier templates (btn_tier_assaulter_{word}_troop.png, levels one-seven captured). promote_value overridden to 'Highest Tier' (distinct from 'Promote Troops', which this task reserves for the actual promote-arrow mechanic above). locked_template enables POSITIVE lock detection (2026-08-07): finds the leftmost visible lock icon and taps tile_spacing_px to its left, rather than inferring 'locked' from a numbered template failing to match — a genuinely-unlocked tier can legitimately score below threshold due to capture-source noise (confirmed: tier 7 scored 0.753 against a 0.9 threshold despite being unlocked), so absence of a match was never a reliable locked signal. threshold/per-tier templates now only used as a fallback if no lock is found anywhere on screen; scroll_y_pct 81 matches the pixel-sampled carousel row position; tile_spacing_px 99 measured empirically from a reference screenshot (2 tiles apart = 198px)."
+    },
+    {
+      "action": "skip_to_unless_setting",
+      "setting": "train_troops.rider_level",
+      "equals": "Promote Troops",
+      "skip_to": 43,
+      "note": "Rider's dropdown is set to a specific level, not Promote Troops — go select that level instead"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0,
+      "note": "Settle before checking for a promotable tier — only reached when rider_level == Promote Troops"
+    },
+    {
+      "action": "promote_highest_troop",
+      "required": false,
+      "skip_to": 48,
+      "note": "Same as the Assaulter version above, gated on Rider's own setting"
+    },
+    {
+      "action": "select_troop_level",
+      "setting": "train_troops.rider_level",
+      "template_pattern": "btn_tier_rider_{word}_troop.png",
+      "promote_value": "Highest Tier",
+      "locked_template": "btn_locked_tier_universal.png",
+      "tile_spacing_px": 99,
+      "required": false,
+      "skip_to": 48,
+      "threshold": 0.9,
+      "scroll_y_pct": 81,
+      "note": "Per-type tier templates (btn_tier_rider_{word}_troop.png). Same 'Highest Tier' + locked_template positive-lock-detection override as the Assaulter step above — see that note for the full rationale."
+    },
+    {
+      "action": "skip_to_unless_setting",
+      "setting": "train_troops.shooter_level",
+      "equals": "Promote Troops",
+      "skip_to": 47,
+      "note": "Shooter's dropdown is set to a specific level, not Promote Troops — go select that level instead"
+    },
+    {
+      "action": "wait",
+      "seconds": 3.0,
+      "note": "Settle before checking for a promotable tier — only reached when shooter_level == Promote Troops"
+    },
+    {
+      "action": "promote_highest_troop",
+      "required": false,
+      "skip_to": 48,
+      "note": "Same as above, gated on Shooter's own setting"
+    },
+    {
+      "action": "select_troop_level",
+      "setting": "train_troops.shooter_level",
+      "template_pattern": "btn_tier_shooter_{word}_troop.png",
+      "promote_value": "Highest Tier",
+      "locked_template": "btn_locked_tier_universal.png",
+      "tile_spacing_px": 99,
+      "required": false,
+      "threshold": 0.9,
+      "scroll_y_pct": 81,
+      "note": "Per-type tier templates (btn_tier_shooter_{word}_troop.png). Same 'Highest Tier' + locked_template positive-lock-detection override as the Assaulter step above — no skip_to needed, falls through to the final stop next either way"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0,
+      "note": "STOP HERE for manual testing — every path (promoted, nothing promotable, not set to Promote Troops, or nothing enabled/found at all) converges here."
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_start_train_troops.png",
+      "required": false
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "required": false,
+      "log_skip": "No back button found — could not back out of the training panel"
+    }
+  ]
+}

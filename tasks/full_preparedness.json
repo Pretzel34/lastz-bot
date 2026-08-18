@@ -2,18 +2,9 @@
   "name": "full_preparedness",
   "actions": [
     {
-      "action": "if_template_tap",
-      "template": "btn_full_preparedness_entry.png",
-      "required": false,
-      "note": "Open the Full Preparedness event panel"
-    },
-    {
-      "action": "wait",
-      "seconds": 3.0
-    },
-    {
       "action": "dispatch_fp_task",
-      "note": "Reads fp_current_event.json to determine and run the active child task"
+      "set_flag": "fp_event_ran",
+      "note": "Reads fp_current_event.json to determine and run the active child task. Only succeeds when it actually dispatched an event — skipped when disabled/expired/not yet captured."
     },
     {
       "action": "wait",
@@ -25,7 +16,8 @@
       "max_taps": 3,
       "delay": 1.5,
       "required": false,
-      "note": "Collect up to 3 reward chests"
+      "if_flag": "fp_event_ran",
+      "note": "Collect up to 3 reward chests — only when an event actually ran above, otherwise this blindly taps whatever's still on screen from an unrelated task"
     },
     {
       "action": "wait",
@@ -36,6 +28,22 @@
       "template": "btn_close.png",
       "required": false,
       "note": "Close the event panel"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
+    },
+    {
+      "action": "tap_first_found",
+      "templates": [
+        "btn_back.png",
+        "btn_back_out_of_page.png",
+        "btn_press_back.png",
+        "btn_hero_back.png"
+      ],
+      "required": false,
+      "log_skip": "No back button found — could not back out to HQ view",
+      "note": "Fallback: btn_close didn't match — try the generic back buttons so the next task doesn't inherit a stuck panel"
     }
   ]
 }

@@ -2,8 +2,26 @@
   "name": "age_of_science",
   "actions": [
     {
-      "action": "wait",
-      "seconds": 2.0
+      "action": "run_task",
+      "task": "fp_age_of_science_research.json",
+      "note": "Start/speed-up research for this event"
+    },
+    {
+      "action": "run_task",
+      "task": "fp_reward_collection.json",
+      "note": "Claim any FP rewards unlocked by the research above — same pattern hero_progression.json uses"
+    },
+    {
+      "action": "run_task",
+      "task": "fp_age_of_science_research.json",
+      "if_not_flag": ["fp_chest1_claimed", "fp_chest2_claimed", "fp_chest3_claimed"],
+      "note": "No chest was claimed on the first pass — run another research/speed-up pass before trying collection again"
+    },
+    {
+      "action": "run_task",
+      "task": "fp_reward_collection.json",
+      "if_not_flag": ["fp_chest1_claimed", "fp_chest2_claimed", "fp_chest3_claimed"],
+      "note": "Retry collection after the extra research pass above — medal chest (24hr) is untouched by this retry, only chests 1-3 (4hr window) gate it"
     }
   ]
 }
