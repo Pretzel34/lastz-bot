@@ -18,6 +18,8 @@ python -m PyInstaller --noconfirm --onefile --name LastZBot --uac-admin --nocons
   --collect-all easyocr ^
   --hidden-import adbutils ^
   --collect-all cv2 ^
+  --collect-all torch ^
+  --collect-all torchvision ^
   gui.py
 
 echo Build complete. Output: dist\LastZBot.exe
