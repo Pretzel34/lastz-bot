@@ -41,7 +41,7 @@
       "template": "btn_finish_congrats.png",
       "if_flag": "finish_now_found",
       "required": false,
-      "skip_to_on_found": 23,
+      "skip_to_on_found": 36,
       "log_success": "Building finished — looping to check for more",
       "note": "Step 4 flow: confirms the free finish, then skips straight past the Back step to the final wait so the loop restarts without also trying to start a new build this pass."
     },
@@ -97,11 +97,90 @@
       "seconds": 4.0
     },
     {
+      "action": "skip_to_unless_setting",
+      "setting": "upgrade_buildings.replenish_resources",
+      "if_flag": "initiate_build_found",
+      "skip_to": 28,
+      "note": "Starting a build/upgrade can trigger a resource/'Get More' upsell popup because there aren't enough resources to start it — same popup research.json now handles. If 'Replenish Resources' is unchecked in Upgrade Buildings farm settings, skip straight to just closing the popup below (old behavior — this path previously had NO handling for this popup at all, since the existing btn_exit_purchase step further down only fires for the speed-up-only branch). If checked, fall through into actually replenishing so the build starts for real."
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_replenish_all.png",
+      "if_flag": "initiate_build_found",
+      "required": false,
+      "note": "Replenish Resources is checked — buy/use whatever the popup needs instead of closing it"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "initiate_build_found"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_don't_remind.png",
+      "if_flag": "initiate_build_found",
+      "required": false,
+      "note": "Dismiss the 'don't remind me again' style confirmation if it appears — not guaranteed every time"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "initiate_build_found"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_confirm.png",
+      "if_flag": "initiate_build_found",
+      "required": false,
+      "note": "Confirm the replenish"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "initiate_build_found"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_upgrade.png",
+      "if_flag": "initiate_build_found",
+      "required": false,
+      "note": "Resources replenished — retry starting the build, this time it should go through without the upsell popup reappearing"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "initiate_build_found"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_upgrade_start_alt.png",
+      "if_flag": "initiate_build_found",
+      "required": false,
+      "note": "Fallback variant, same as the first attempt above"
+    },
+    {
+      "action": "wait",
+      "seconds": 4.0,
+      "if_flag": "initiate_build_found"
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_exit_purchase.png",
+      "if_flag": "initiate_build_found",
+      "required": false,
+      "note": "Close the popup — either because Replenish Resources is unchecked (skip_to landed here directly), or as a harmless safety net if anything's still lingering after a successful replenish"
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0,
+      "if_flag": "initiate_build_found"
+    },
+    {
       "action": "if_template_tap",
       "template": "btn_get_building_help.png",
       "if_flag": "initiate_build_found",
       "required": false,
-      "skip_to_on_found": 23,
+      "skip_to_on_found": 36,
       "log_success": "Building help requested — skipping back-out, looping directly",
       "note": "When this tap succeeds we're already in a state where the back-out chain isn't needed — skip straight to the final wait so the loop restarts from step 1."
     },
