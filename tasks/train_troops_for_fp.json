@@ -5,7 +5,9 @@
       "action": "ensure_hq_view",
       "hq_btn": "btn_go_world.png",
       "world_btn": "btn_go_headquarters.png",
-      "note": "Guarantee HQ view before anything else"
+      "back_btn": "btn_press_back.png",
+      "verify_retries": 5,
+      "note": "Guarantee HQ view before anything else — if neither view can be confirmed, tap back up to 5x rather than guessing; abandons the task (ABORT_TASK) if HQ still can't be verified"
     },
     {
       "action": "wait",
@@ -121,10 +123,26 @@
       "seconds": 4.0
     },
     {
-      "action": "if_template_tap",
+      "action": "if_template_found",
       "template": "btn_start_train_troops.png",
       "required": false,
-      "note": "Second attempt — same template, checked again after the wait above"
+      "skip_to_on_found": 28,
+      "log_found": "Start Training still showing after tap — Assaulter capacity maxed, skipping speed-up/collect for this type",
+      "log_skip": "Start Training gone — Assaulter training started, proceeding to speed-up",
+      "note": "Added 2026-10-01 (root-caused via bot-log-doctor + Preston's own observation — see project_bot_train_troops_fp_capacity_cap memory): tapping Start Training either starts training (the button disappears and the Speed Up button takes its place next) or is rejected because this camp's unit capacity is maxed (the button just stays on screen). These two outcomes are mutually exclusive, so checking whether Start Training persists after the tap is enough to detect the capacity-cap case directly, instead of silently burning ~15s running the Speed Up tap + 6x retry loop against a camp that never started training."
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_speed_up_train.png",
+      "fallback_templates": [
+        "btn_speed_up_troop_training.png"
+      ],
+      "required": false,
+      "note": "Explicit tap on the real green 'Speed Up' button to open the item-selection popup. Previously this step blindly retried btn_start_train_troops.png (the 'Train' button) a second time, which is visually near-identical to this Speed Up button (same green/rounded/white-text style) -- it was opening the popup only by accidental mismatch, not reliably."
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
     },
     {
       "action": "wait",
@@ -133,7 +151,9 @@
     {
       "action": "repeat_if_template",
       "template": "btn_use_speed_up_train.png",
-      "note": "Keep tapping the speed-up button until it's no longer present — each tap consumes a speed-up until training is instantly complete"
+      "not_found_retries": 6,
+      "delay": 1.0,
+      "note": "Keep tapping the speed-up button until it's no longer present — each tap consumes a speed-up until training is instantly complete. Retries widened to 6x1.0s (~7s) so a slow-rendering popup isn't misread as 'button already gone'. Deliberately does NOT run dismiss_ads.json first — btn_ad_close.png is a generic X that matches this same Speed Up dialog's own close button and was closing the popup before this check ever ran"
     },
     {
       "action": "wait",
@@ -151,19 +171,12 @@
       "note": "Only this type's collect templates are checked here since this tail is now specific to this troop type"
     },
     {
-      "action": "if_template_tap",
-      "template": "btn_go_world.png",
-      "required": false,
-      "note": "Recenter before the Rider search."
-    },
-    {
-      "action": "wait",
-      "seconds": 4.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_go_headquarters.png",
-      "required": false
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "back_btn": "btn_press_back.png",
+      "verify_retries": 5,
+      "note": "Recenter before the Rider search. Verified back-out-and-confirm instead of a single back tap + blind recenter -- one back-tap alone was often only closing the tier-select panel and leaving the camp screen open, so the unverified recenter attempts kept failing and burning 30s in a blind camp search. Aborts the task if HQ/world still can't be confirmed after 5 back-taps."
     },
     {
       "action": "wait",
@@ -258,10 +271,26 @@
       "seconds": 4.0
     },
     {
-      "action": "if_template_tap",
+      "action": "if_template_found",
       "template": "btn_start_train_troops.png",
       "required": false,
-      "note": "Second attempt — same template, checked again after the wait above"
+      "skip_to_on_found": 51,
+      "log_found": "Start Training still showing after tap — Rider capacity maxed, skipping speed-up/collect for this type",
+      "log_skip": "Start Training gone — Rider training started, proceeding to speed-up",
+      "note": "Same capacity-cap detection as the Assaulter block above — see that step's note for the full rationale."
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_speed_up_train.png",
+      "fallback_templates": [
+        "btn_speed_up_troop_training.png"
+      ],
+      "required": false,
+      "note": "Explicit tap on the real green 'Speed Up' button to open the item-selection popup. Previously this step blindly retried btn_start_train_troops.png (the 'Train' button) a second time, which is visually near-identical to this Speed Up button (same green/rounded/white-text style) -- it was opening the popup only by accidental mismatch, not reliably."
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
     },
     {
       "action": "wait",
@@ -270,7 +299,9 @@
     {
       "action": "repeat_if_template",
       "template": "btn_use_speed_up_train.png",
-      "note": "Keep tapping the speed-up button until it's no longer present — each tap consumes a speed-up until training is instantly complete"
+      "not_found_retries": 6,
+      "delay": 1.0,
+      "note": "Keep tapping the speed-up button until it's no longer present — each tap consumes a speed-up until training is instantly complete. Retries widened to 6x1.0s (~7s) so a slow-rendering popup isn't misread as 'button already gone'. Deliberately does NOT run dismiss_ads.json first — btn_ad_close.png is a generic X that matches this same Speed Up dialog's own close button and was closing the popup before this check ever ran"
     },
     {
       "action": "wait",
@@ -288,19 +319,12 @@
       "note": "Only this type's collect templates are checked here since this tail is now specific to this troop type"
     },
     {
-      "action": "if_template_tap",
-      "template": "btn_go_world.png",
-      "required": false,
-      "note": "Recenter before the Shooter search."
-    },
-    {
-      "action": "wait",
-      "seconds": 4.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_go_headquarters.png",
-      "required": false
+      "action": "ensure_hq_view",
+      "hq_btn": "btn_go_world.png",
+      "world_btn": "btn_go_headquarters.png",
+      "back_btn": "btn_press_back.png",
+      "verify_retries": 5,
+      "note": "Recenter before the Shooter search. Verified back-out-and-confirm instead of a single back tap + blind recenter -- one back-tap alone was often only closing the tier-select panel and leaving the camp screen open, so the unverified recenter attempts kept failing and burning 30s in a blind camp search. Aborts the task if HQ/world still can't be confirmed after 5 back-taps."
     },
     {
       "action": "wait",
@@ -377,10 +401,26 @@
       "seconds": 4.0
     },
     {
-      "action": "if_template_tap",
+      "action": "if_template_found",
       "template": "btn_start_train_troops.png",
       "required": false,
-      "note": "Second attempt — same template, checked again after the wait above"
+      "skip_to_on_found": 70,
+      "log_found": "Start Training still showing after tap — Shooter capacity maxed, ending task (last troop type)",
+      "log_skip": "Start Training gone — Shooter training started, proceeding to speed-up",
+      "note": "Same capacity-cap detection as the Assaulter/Rider blocks above. Shooter is the last troop type in this task, so on a maxed capacity this jumps to step 70 (one past the final action, index 69) to finish the task cleanly via a normal skip_to rather than falling through to ABORT_TASK. That distinction matters here: army_expansion.json's run_task call for this task has no contain_abort, so an ABORT_TASK would propagate up and skip fp_reward_collection.json and the second training pass (start_train_troops_fp.json) entirely — a routine 'this one camp is maxed' state should never do that."
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_speed_up_train.png",
+      "fallback_templates": [
+        "btn_speed_up_troop_training.png"
+      ],
+      "required": false,
+      "note": "Explicit tap on the real green 'Speed Up' button to open the item-selection popup. Previously this step blindly retried btn_start_train_troops.png (the 'Train' button) a second time, which is visually near-identical to this Speed Up button (same green/rounded/white-text style) -- it was opening the popup only by accidental mismatch, not reliably."
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
     },
     {
       "action": "wait",
@@ -389,7 +429,9 @@
     {
       "action": "repeat_if_template",
       "template": "btn_use_speed_up_train.png",
-      "note": "Keep tapping the speed-up button until it's no longer present — each tap consumes a speed-up until training is instantly complete"
+      "not_found_retries": 6,
+      "delay": 1.0,
+      "note": "Keep tapping the speed-up button until it's no longer present — each tap consumes a speed-up until training is instantly complete. Retries widened to 6x1.0s (~7s) so a slow-rendering popup isn't misread as 'button already gone'. Deliberately does NOT run dismiss_ads.json first — btn_ad_close.png is a generic X that matches this same Speed Up dialog's own close button and was closing the popup before this check ever ran"
     },
     {
       "action": "wait",
