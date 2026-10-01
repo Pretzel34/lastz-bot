@@ -41,6 +41,37 @@ jobs:
         run: .\build_windows.bat
         shell: cmd
 
+      - name: Smoke-test executable
+        shell: powershell
+        timeout-minutes: 3
+        run: |
+          # v1.0.66 shipped a build that crashed on every launch (RuntimeError:
+          # operator torchvision::nms does not exist) because PyInstaller's
+          # static analysis silently failed to bundle torchvision's compiled
+          # extension -- the build itself succeeded, so nothing here caught it
+          # before the installer went out. This actually launches the frozen
+          # exe and fails the workflow if it crashes on startup, instead of
+          # only trusting that PyInstaller exited 0.
+          $exe = "dist\LastZBot.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Host "::error::$exe not found after build"
+            exit 1
+          }
+          $stdout = "smoke_stdout.txt"
+          $stderr = "smoke_stderr.txt"
+          $proc = Start-Process -FilePath $exe -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          Start-Sleep -Seconds 12
+          if ($proc.HasExited) {
+            Write-Host "::error::LastZBot.exe exited within 12s of launch (exit code $($proc.ExitCode)) -- likely crashed on startup"
+            Write-Host "--- stdout ---"
+            Get-Content $stdout -ErrorAction SilentlyContinue
+            Write-Host "--- stderr ---"
+            Get-Content $stderr -ErrorAction SilentlyContinue
+            exit 1
+          }
+          Write-Host "LastZBot.exe still running after 12s -- startup smoke test passed"
+          Stop-Process -Id $proc.Id -Force
+
       - name: Install NSIS
         run: choco install nsis -y
 
