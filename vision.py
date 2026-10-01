@@ -157,6 +157,8 @@ class VisionEngine:
         crop_h, crop_w = screen_cv.shape[:2]
         th, tw = template_cv.shape[:2]
         if crop_h < th or crop_w < tw:
+            print(f"[Vision] Region too small for {Path(template_path).name} "
+                  f"(crop {crop_w}x{crop_h} < template {tw}x{th}) — no comparison made")
             return MatchResult(found=False)
 
         # Run template matching
@@ -285,6 +287,7 @@ class VisionEngine:
         """
         print(f"[Vision] Waiting for: {Path(template_path).name} (timeout={timeout}s)")
         start = time.time()
+        last_result = MatchResult(found=False)
 
         while time.time() - start < timeout:
             screenshot = bot.screenshot()
@@ -295,10 +298,12 @@ class VisionEngine:
                       f"at ({result.x}, {result.y}) after {elapsed:.1f}s "
                       f"[conf: {result.confidence:.2f}]")
                 return result
+            last_result = result
             time.sleep(poll_interval)
 
-        print(f"[Vision] Timeout — {Path(template_path).name} never appeared")
-        return MatchResult(found=False)
+        print(f"[Vision] Timeout — {Path(template_path).name} never appeared "
+              f"[last conf: {last_result.confidence:.2f}]")
+        return last_result
 
     def wait_for_template_gone(
         self,
