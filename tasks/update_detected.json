@@ -3,41 +3,24 @@
   "actions": [
     {
       "action": "if_template_found",
-      "template": "btn_update_detected.png",
+      "template": "btn_close_update_tips.png",
       "skip_task_if_not_found": true,
-      "log_found": "Update dialog detected — running update sequence",
-      "log_skip": "No update dialog — continuing normally"
+      "log_found": "Update dialog detected — closing via X (not updating)",
+      "log_skip": "No update dialog — continuing normally",
+      "note": "Root-caused 2026-10-01 (bug-log-doctor, live repro on a cold MEmu-0 boot): the in-game 'A new version detected' Tips popup changed its footer from two buttons ('Google Play' / 'Start Game') to a single 'GO' button plus an X-close icon in the title bar (seen at App Ver 1.250.701(2658)). The old detection template btn_update_detected.png (a crop of the whole old two-button dialog) scored only ~0.64 against the current popup vs the 0.8 threshold, so detection silently failed every time and this task no-op'd — leaving the popup on screen to block verify_in_hq and every task behind it on nearly every cold start (seen in ~19/20 recent bot_*.log files as 'Action failed — recovering view' right after 'Bot started'). Fix: detect+tap the new X-close icon (btn_close_update_tips.png, cropped from a live repro frame; verified via vision.find_template at score ~0.97 on-popup vs ~0.55 on a plain loading screen — well separated from the 0.8 threshold). Deliberately closing via X rather than running the old Google-Play-update flow — we don't want the bot force-updating the app mid-run, which could change the UI the other templates are calibrated against."
     },
     {
       "action": "wait",
-      "seconds": 4.0
+      "seconds": 1.0
     },
     {
       "action": "if_template_tap",
-      "template": "btn_go_to_store_for_update.png",
+      "template": "btn_close_update_tips.png",
       "required": false
     },
     {
       "action": "wait",
-      "seconds": 4.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_update_button.png",
-      "required": false
-    },
-    {
-      "action": "wait",
-      "seconds": 20.0
-    },
-    {
-      "action": "if_template_tap",
-      "template": "btn_go_back_to_game.png",
-      "required": false
-    },
-    {
-      "action": "wait",
-      "seconds": 4.0
+      "seconds": 2.0
     }
   ]
 }
