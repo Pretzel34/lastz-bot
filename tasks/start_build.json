@@ -6,7 +6,9 @@
       "action": "ensure_hq_view",
       "hq_btn": "btn_go_world.png",
       "world_btn": "btn_go_headquarters.png",
-      "note": "Guarantee HQ view before touching any build actions — returns to HQ if in world, no-ops if already in HQ"
+      "back_btn": "btn_press_back.png",
+      "verify_retries": 5,
+      "note": "Guarantee HQ view before touching any build actions — returns to HQ if in world, no-ops if already in HQ. 2026-10-01: root-caused via record-task-run repro (video: C:\\bot\\Task Recordings\\start_build_20261001_125754.mp4) — this step runs right after dismiss_ads/reset_flags, often while the game is still on its loading screen, so the old default (verify_retries=0) blind tap_zone fires before either view is renderable, taps nothing useful, and declares success anyway. By the time the rest of this task's checks run, the game has finished loading into the World Map view (not HQ), so every HQ-only template (btn_build_icon/btn_finish_now/btn_initiate_build_alt/btn_speed_up/back buttons) comes back not-found and the task wrongly falls through to the 'nothing to build' exit. Same problem class already hardened in start_train_troops_fp.json's ensure_hq_view calls — adopting the same verified back-tap-and-recheck pattern here instead of the blind single tap."
     },
     {
       "action": "wait",
