@@ -83,7 +83,8 @@
       "template": "btn_boomer.png",
       "fallback_templates": [
         "btn_frostbane_boomer.png",
-        "btn_stegosaurus_boomer.png"
+        "btn_stegosaurus_boomer.png",
+        "btn_succubus_boomer.png"
       ],
       "skip_task_if_not_found": true,
       "log_skip": "Boomer search panel not found \u00e2\u20ac\u201d wrong screen, cancelling task",

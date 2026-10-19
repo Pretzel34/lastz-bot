@@ -30,14 +30,18 @@
       "fallback_templates": [
         "btn_furylord_icon_3_alt.png",
         "btn_furylord_icon_2.png",
-        "btn_furylord_icon_2_alt.png"
+        "btn_furylord_icon_2_alt.png",
+        "btn_s4_furylord.png",
+        "btn_s4_furylord_alt.png"
       ],
+      "threshold": 0.8,
       "required": false,
       "on_not_found_continue": true,
       "on_not_found": [
         {
           "action": "scroll_left",
-          "note": "Icon row may be scrolled — try left first"
+          "start_y_pct": 95,
+          "note": "Icon row may be scrolled — try left first. start_y_pct=95 targets the bottom event-tab strip itself; the default (~80%) swipes the leaderboard content above it and never touches the tabs."
         },
         {
           "action": "wait",
@@ -49,14 +53,18 @@
           "fallback_templates": [
             "btn_furylord_icon_3_alt.png",
             "btn_furylord_icon_2.png",
-            "btn_furylord_icon_2_alt.png"
+            "btn_furylord_icon_2_alt.png",
+            "btn_s4_furylord.png",
+            "btn_s4_furylord_alt.png"
           ],
+          "threshold": 0.8,
           "required": false
         },
         {
           "action": "scroll_right",
           "steps": 2,
-          "note": "Undo the left scroll and continue past the original position to the right"
+          "start_y_pct": 95,
+          "note": "Undo the left scroll and continue past the original position to the right. start_y_pct=95 targets the bottom event-tab strip itself; the default (~88%) swipes the leaderboard content above it and never touches the tabs."
         },
         {
           "action": "wait",
@@ -68,8 +76,11 @@
           "fallback_templates": [
             "btn_furylord_icon_3_alt.png",
             "btn_furylord_icon_2.png",
-            "btn_furylord_icon_2_alt.png"
+            "btn_furylord_icon_2_alt.png",
+            "btn_s4_furylord.png",
+            "btn_s4_furylord_alt.png"
           ],
+          "threshold": 0.8,
           "required": false
         }
       ],
@@ -126,7 +137,17 @@
     },
     {
       "action": "wait",
-      "seconds": 4.0
+      "seconds": 2.0
+    },
+    {
+      "action": "if_template_tap",
+      "template": "btn_go_generic.png",
+      "required": false,
+      "note": "Safety-net retry: a delayed 'Congratulations!' reward popup can appear right as the first GO tap lands, absorbing the tap and leaving the game on the same un-advanced landing page (btn_go_generic still faintly visible through the dimmed overlay, so the first tap 'succeeds' without a real screen change). If the first tap actually worked, this harmlessly finds nothing and no-ops."
+    },
+    {
+      "action": "wait",
+      "seconds": 2.0
     },
     {
       "action": "if_template_tap",
