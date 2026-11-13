@@ -188,6 +188,8 @@ class BotEngine:
         # Threading
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        # Soft stop: finish the in-flight task, then exit before starting the next one
+        self._soft_stop_event = threading.Event()
         self._pause_event = threading.Event()
         self._pause_event.set()  # not paused by default
 
@@ -339,6 +341,7 @@ class BotEngine:
             return
 
         self._stop_event.clear()
+        self._soft_stop_event.clear()
         self._pause_event.set()
         self.stats = SessionStats()
         self.current_task_index = 0
@@ -363,6 +366,11 @@ class BotEngine:
                 self.bot.disconnect()
             except Exception:
                 pass
+
+    def request_soft_stop(self):
+        """Ask the bot to stop at the next task boundary (the current task runs to completion)."""
+        self._log("Soft stop requested — will exit after the current task")
+        self._soft_stop_event.set()
 
     def pause(self):
         """Pause execution after the current action."""
@@ -425,13 +433,38 @@ class BotEngine:
 
     def _run_all_tasks(self) -> bool:
         all_ok = True
+        # Rally groups (queued as N identical tasks): after MAX_RALLY_FAILS in a row
+        # with no confirmed march, drop the rest of the group and move on. The daily
+        # counter is untouched, so the next cycle retries from where it left off.
+        MAX_RALLY_FAILS = 3
+        rally_fails: dict = {}
+        rally_skip: set = set()
         for i, task in enumerate(self.tasks):
             if self._stop_event.is_set():
                 break
+            group = task.get("rally_group")
+            if group in rally_skip:
+                continue
             self.current_task_index = i
             ok = self._run_task(task)
             if not ok:
                 all_ok = False
+            if group and self.executor:
+                if getattr(self.executor, "rally_recorded", False):
+                    rally_fails[group] = 0
+                elif getattr(self.executor, "rally_limit_hit", False):
+                    rally_skip.add(group)
+                else:
+                    rally_fails[group] = rally_fails.get(group, 0) + 1
+                    if rally_fails[group] >= MAX_RALLY_FAILS:
+                        rally_skip.add(group)
+                        self._log(f"⏭ {MAX_RALLY_FAILS} rallies in a row sent no march — skipping the remaining "
+                                  f"'{group}' tasks this run (daily count unchanged)")
+            if self._soft_stop_event.is_set():
+                self._log(f"Soft stop: time budget reached — stopping cleanly after '{task.get('name', 'unnamed')}'")
+                # Also ends the outer loop when loop_tasks is on
+                self._stop_event.set()
+                break
         return all_ok
 
     def _run_task(self, task: dict) -> bool:

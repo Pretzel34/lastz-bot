@@ -210,6 +210,9 @@ class ActionExecutor:
     def reset_flags(self):
         """Clear session flags set via 'set_flag'. Called by BotEngine at the start of each task."""
         self._flags = {}
+        # Per-task rally outcome, read by BotEngine to detect consecutive failed rallies
+        self.rally_recorded = False     # a march was confirmed and counted this task
+        self.rally_limit_hit = False    # rally_count_check aborted: daily limit reached
 
     def set_farm_settings(self, settings: dict):
         """Update farm task settings (e.g. rally.boomer_level). Called by BotEngine before each task."""
@@ -678,6 +681,19 @@ class ActionExecutor:
           {"action": "ensure_hq_view",
            "hq_btn": "btn_go_world.png",
            "world_btn": "btn_go_headquarters.png"}
+
+        Optional hardening — opt-in only, default behavior above is unchanged:
+          back_btn        - template to tap when neither hq_btn nor world_btn is found
+                             (default "btn_press_back.png")
+          verify_retries  - if > 0 (default 0 = old behavior), and neither view is
+                             confirmed, repeatedly tap back_btn and re-check instead of
+                             blindly tap_zone-ing once and declaring success
+          retry_delay     - seconds to wait between verify_retries attempts (default 1.5)
+
+          If verify_retries is set and the view is still unconfirmed after exhausting
+          the retries, returns ABORT_TASK instead of a false "ok" — the caller can't
+          trust it's on the right screen, so the task should stop rather than keep
+          acting blind.
         """
         import time
 
@@ -685,17 +701,21 @@ class ActionExecutor:
         # world_btn: visible when IN WORLD view → tap it to go to HQ
         hq_btn    = action.get("hq_btn",    "btn_go_world.png")
         world_btn = action.get("world_btn", "btn_go_headquarters.png")
-
-        screenshot = self.bot.screenshot()
+        back_btn        = action.get("back_btn", "btn_press_back.png")
+        verify_retries  = int(action.get("verify_retries", 0))
+        retry_delay     = float(action.get("retry_delay", 1.5))
 
         hq_path    = self._template_path(hq_btn)
         world_path = self._template_path(world_btn)
+        back_path  = self._template_path(back_btn)
 
         w, h = self._screen_size()
         x_pct = float(action.get("x_pct", 91.1))
         y_pct = float(action.get("y_pct", 95.6))
         x = int(w * x_pct / 100)
         y = int(h * y_pct / 100)
+
+        screenshot = self.bot.screenshot()
 
         # Check which view we are in using the HQ view indicator
         # hq_btn is ONLY visible when in HQ view
@@ -721,13 +741,58 @@ class ActionExecutor:
             time.sleep(2.0)
             return self._ok(action, f"ensure_hq_view: world→HQ via tap_zone {x_pct}%,{y_pct}%")
 
-        else:
-            # Neither detected — just try tap_zone anyway
+        elif verify_retries <= 0:
+            # Old behavior, unchanged for every caller that doesn't opt in: neither
+            # detected — just try tap_zone anyway and declare success.
             if self.log_callback:
                 self.log_callback("ensure_hq_view: unknown state — attempting tap_zone")
             self.bot.tap(x, y)
             time.sleep(2.0)
             return self._ok(action, "ensure_hq_view: unknown state, tapped tap_zone")
+
+        else:
+            # Opted-in hardening: we don't know what screen we're on. Tap the generic
+            # back button and re-check, instead of guessing with tap_zone — a stray tap
+            # on an unknown screen can do real damage (spend items, confirm a purchase).
+            if self.log_callback:
+                self.log_callback(
+                    f"ensure_hq_view: unknown state — tapping '{back_btn}' up to "
+                    f"{verify_retries}x to recover a verifiable view"
+                )
+            for attempt in range(1, verify_retries + 1):
+                back_match = self.vision.find_template(screenshot, back_path)
+                if back_match.found:
+                    self.bot.tap(back_match.x, back_match.y)
+                else:
+                    # No back button visible either — fall back to the hardware/OS back
+                    # gesture so we still make progress off whatever this screen is.
+                    self.bot.press_back()
+                time.sleep(retry_delay)
+
+                screenshot = self.bot.screenshot()
+                in_hq    = self.vision.find_template(screenshot, hq_path).found
+                in_world = self.vision.find_template(screenshot, world_path).found
+                if self.log_callback:
+                    self.log_callback(
+                        f"ensure_hq_view: retry {attempt}/{verify_retries} — "
+                        f"in_hq={in_hq} in_world={in_world}"
+                    )
+
+                if in_hq:
+                    return self._ok(action, f"ensure_hq_view: recovered to HQ after {attempt} back-tap(s)")
+                if in_world:
+                    world_match = self.vision.find_template(screenshot, world_path)
+                    self.bot.tap(world_match.x, world_match.y)
+                    time.sleep(2.0)
+                    return self._ok(action, f"ensure_hq_view: recovered to world after {attempt} back-tap(s), tapped through to HQ")
+
+            msg = (
+                f"ensure_hq_view: still unverified after {verify_retries} back-tap(s) — "
+                f"abandoning task rather than acting blind"
+            )
+            if self.log_callback:
+                self.log_callback(f"  ⚠ {msg}")
+            return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
 
     def _verify_in_hq(self, action: dict) -> ActionResult:
         """
@@ -738,36 +803,59 @@ class ActionExecutor:
              If found, we are already in HQ; proceed without tapping.
           2. If not found, look for btn_go_to_hq_view_universal.png — visible only in world view.
              If found, tap it to return to HQ, then proceed.
-          3. If neither found and required=true, fail.
+          3. If neither found, retry (re-screenshotting) for up to `settle_timeout` seconds
+             (default 6.0, override via action["settle_timeout"]) before giving up.
+             Root-caused 2026-09-29 (bug report: quick_join_rally / verify_in_hq): this is
+             almost always the FIRST action of a task, run right after a task transition —
+             live logs showed it aborting Quick Join Rally immediately after Furylord backed
+             out, and a standalone repro on a freshly-booted instance hit the identical
+             "neither found" failure while the game's own loading screen was still at 17%,
+             resolving itself within ~3s with no other change. The original code took exactly
+             one screenshot and failed instantly, with no allowance for a screen still mid
+             transition — unlike most other action handlers in this file, which use a
+             timeout/poll pattern (see wait_for_template). A short retry window absorbs that
+             transient case without masking a genuinely stuck state, since it still fails
+             after settle_timeout.
+          4. If still neither found after the retry window and required=true, fail.
         """
         import time
 
         HQ_BTN    = "btn_go_to_world_view_universal.png"
         WORLD_BTN = "btn_go_to_hq_view_universal.png"
         required  = action.get("required", True)
+        settle_timeout = float(action.get("settle_timeout", 6.0))
+        poll_interval  = 1.0
 
-        screenshot = self.bot.screenshot()
         hq_path    = self._template_path(HQ_BTN)
         world_path = self._template_path(WORLD_BTN)
 
-        in_hq    = self.vision.find_template(screenshot, hq_path).found
-        in_world = self.vision.find_template(screenshot, world_path).found
+        start   = time.time()
+        attempt = 0
+        while True:
+            attempt += 1
+            screenshot  = self.bot.screenshot()
+            hq_match    = self.vision.find_template(screenshot, hq_path)
+            world_match = self.vision.find_template(screenshot, world_path)
+            in_hq, in_world = hq_match.found, world_match.found
 
-        if self.log_callback:
-            self.log_callback(f"verify_in_hq: in_hq={in_hq} in_world={in_world}")
-
-        if in_hq:
             if self.log_callback:
-                self.log_callback("verify_in_hq: HQ view confirmed — no action needed")
-            return self._ok(action, "verify_in_hq: already in HQ")
+                self.log_callback(f"verify_in_hq: in_hq={in_hq} in_world={in_world} (attempt {attempt})")
 
-        if in_world:
-            match = self.vision.find_template(screenshot, world_path)
-            if self.log_callback:
-                self.log_callback(f"verify_in_hq: world view — tapping {WORLD_BTN} to return to HQ")
-            self.bot.tap(match.x, match.y)
-            time.sleep(2.0)
-            return self._ok(action, "verify_in_hq: world→HQ via tap")
+            if in_hq:
+                if self.log_callback:
+                    self.log_callback("verify_in_hq: HQ view confirmed — no action needed")
+                return self._ok(action, "verify_in_hq: already in HQ")
+
+            if in_world:
+                if self.log_callback:
+                    self.log_callback(f"verify_in_hq: world view — tapping {WORLD_BTN} to return to HQ")
+                self.bot.tap(world_match.x, world_match.y)
+                time.sleep(2.0)
+                return self._ok(action, "verify_in_hq: world→HQ via tap")
+
+            if time.time() - start >= settle_timeout:
+                break
+            time.sleep(poll_interval)
 
         if required:
             return self._fail(action, "verify_in_hq: neither HQ nor world view button found")
@@ -5075,12 +5163,57 @@ class ActionExecutor:
                 self.bot.tap(r.x, r.y)
                 return self._ok(action, f"tap_ocr_pattern: tapped '{r.text}' at ({r.x}, {r.y})")
 
+        self._save_ocr_miss_debug(screenshot, ocr_pattern, region, min_conf)
+
         skip_msg = action.get("log_skip", f"tap_ocr_pattern: no OCR match for '{ocr_pattern}'")
         if self.log_callback:
             self.log_callback(f"  ⏭ {skip_msg}")
         if action.get("required", False):
             return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=skip_msg)
         return ActionResult(status=ActionStatus.SKIPPED, action=action, message=skip_msg)
+
+    def _save_ocr_miss_debug(self, screenshot, ocr_pattern: str, region, requested_min_conf: float):
+        """
+        Dump the exact screenshot tap_ocr_pattern just scanned (plus every text
+        detection down to a much lower confidence floor) whenever it finds no
+        match — so a live miss can be inspected afterward instead of only ever
+        being reproducible from a screen recording, which is a different
+        capture path than bot.screenshot() and isn't proof of what OCR actually
+        saw. Keeps only the most recent 20 dumps.
+        """
+        import json as _json
+        from datetime import datetime as _dt
+        from pathlib import Path as _Path
+
+        try:
+            logs_dir = _Path("logs")
+            logs_dir.mkdir(exist_ok=True)
+            ts = _dt.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            img_path = logs_dir / f"ocr_miss_{ts}.png"
+            screenshot.save(img_path)
+
+            all_results = self.vision.read_text(screenshot, region=region, min_confidence=0.05)
+            dump = {
+                "ocr_pattern": ocr_pattern,
+                "requested_min_confidence": requested_min_conf,
+                "screenshot": str(img_path),
+                "detections": [
+                    {"text": r.text, "confidence": round(r.confidence, 3), "x": r.x, "y": r.y}
+                    for r in all_results
+                ],
+            }
+            json_path = logs_dir / f"ocr_miss_{ts}.json"
+            json_path.write_text(_json.dumps(dump, indent=2), encoding="utf-8")
+            if self.log_callback:
+                self.log_callback(f"  [tap_ocr_pattern] no match — saved {img_path} + {json_path} for diagnosis")
+
+            old = sorted(logs_dir.glob("ocr_miss_*.png"))
+            for stale in old[:-20]:
+                stale.unlink(missing_ok=True)
+                stale.with_suffix(".json").unlink(missing_ok=True)
+        except Exception as e:
+            if self.log_callback:
+                self.log_callback(f"  ⚠ tap_ocr_pattern: failed to save miss debug — {e}")
 
     def _verify_setting_template(self, action: dict) -> ActionResult:
         """
@@ -5822,6 +5955,7 @@ class ActionExecutor:
         if current >= max_rallies:
             msg = f"Rally limit reached ({current}/{max_rallies}) for today{label} — skipping"
             self._log(f"  ⏭ {msg}")
+            self.rally_limit_hit = True
             return ActionResult(status=ActionStatus.ABORT_TASK, action=action, message=msg)
 
         msg = f"Rally count {current}/{max_rallies}{label} — proceeding"
@@ -5866,6 +6000,7 @@ class ActionExecutor:
             _json.dump(counts, f, indent=2)
 
         label = f" [{counter_key}]" if counter_key else ""
+        self.rally_recorded = True
         msg = f"Rally recorded: {counts[key]}/{max_rallies}{label} sent today"
         self._log(f"  ✓ {msg}")
         return self._ok(action, msg)

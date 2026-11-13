@@ -18,6 +18,7 @@ import json
 import re
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 from pathlib import Path
@@ -215,6 +216,7 @@ TASK_CATEGORIES = [
                          "Alliance Recognition", "Fully Armed Alliance", "HQ Management",
                          "Seige To Sieze", "Rapid Growth", "Military Strategies",
                          "Unit Special Training", "Age of Steel", "Peace Shield"]},
+            {"key": "replenish_resources", "label": "Replenish Resources", "type": "toggle", "default": False},
         ]
     },
     {
@@ -247,6 +249,7 @@ TASK_CATEGORIES = [
             {"key": "enabled",                      "label": "Enable Upgrade Buildings",     "type": "toggle", "default": False},
             {"key": "start_upgrade_on_buildings",    "label": "Start Upgrade on Buildings",   "type": "toggle", "default": True},
             {"key": "upgrade_hq",                    "label": "Upgrade HQ",                   "type": "toggle", "default": False},
+            {"key": "replenish_resources",           "label": "Replenish Resources",          "type": "toggle", "default": False},
         ]
     },
     {
@@ -336,6 +339,46 @@ def new_farm(index: int, port: int = None, emulator_type: str = "MEmu") -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Self-relaunch
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _spawn_relaunch_batch():
+    """
+    Spawn a detached batch script that waits a few seconds (letting this
+    process fully exit and release the single-instance mutex), then relaunches
+    the app. Shared by two callers: the normal post-mainloop "Keep Running"
+    check below (covers a clean crash — an exception that unwinds mainloop),
+    and BotApp._watchdog_loop (covers a true hang — mainloop never returns at
+    all, so that post-mainloop check is never reached; root-caused live
+    2026-10-12, gui_20261012.log — the whole process froze mid-_arrange_memu_windows
+    and sat alive-but-unresponsive for 5+ days with nothing to notice or
+    restart it). Both paths need the identical relaunch mechanics, so this is
+    the one place that implements them.
+
+    Intentionally self-contained — no OS task scheduler, no external monitor
+    process. This product ships to customers as installed software, not
+    something run under a developer's own monitoring setup, so recovery has to
+    be something the app does to itself, not infrastructure a buyer has to
+    configure.
+    """
+    import subprocess as _sp
+    import tempfile as _tf
+    if getattr(sys, "frozen", False):
+        _launch_cmd = f'start "" "{sys.executable}"'
+    else:
+        _launch_cmd = f'start "" "{sys.executable}" "{Path(__file__).resolve()}"'
+    _bat = Path(_tf.gettempdir()) / "lastz_restart.bat"
+    _bat.write_text(
+        f"@echo off\ntimeout /t 4 /nobreak > nul\n{_launch_cmd}\ndel \"%~f0\"\n"
+    )
+    _sp.Popen(
+        ["cmd.exe", "/c", str(_bat)],
+        creationflags=_sp.DETACHED_PROCESS | _sp.CREATE_NEW_PROCESS_GROUP,
+        close_fds=True,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Main App
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -390,6 +433,17 @@ class BotApp(ctk.CTk):
         self._build_ui()
         self._nav_select("run_bot")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Hang watchdog — see _watchdog_loop's docstring for the incident this
+        # closes (gui_20261012.log: the whole process froze and sat alive but
+        # unresponsive for 5+ days with nothing to notice). _last_alive is
+        # touched only by the Tk main thread via _heartbeat_tick, so it stops
+        # advancing the moment that thread itself hangs on anything — which is
+        # exactly the condition the watchdog thread (unaffected by a hang on
+        # the main thread) is checking for.
+        self._last_alive = time.time()
+        self._heartbeat_tick()
+        threading.Thread(target=self._watchdog_loop, daemon=True).start()
 
         # Show setup wizard on first launch (no farms.json existed).
         if self._is_first_run:
@@ -1815,6 +1869,75 @@ class BotApp(ctk.CTk):
 
         threading.Thread(target=do, daemon=True).start()
 
+    def _try_arrange_memu_windows(self, lock_timeout: float = 15.0):
+        """Arrange emulator windows, but never let a wedged arrange (e.g. a frozen
+        emulator window) block other farm threads forever on the shared lock."""
+        if self._arrange_lock.acquire(timeout=lock_timeout):
+            try:
+                self._arrange_memu_windows()
+            finally:
+                self._arrange_lock.release()
+        else:
+            self.after(0, lambda: self._log(
+                f"  ⚠ arrange: skipped — window-arrange lock busy >{lock_timeout:.0f}s "
+                f"(a frozen emulator window may be stuck responding)", "warn"))
+
+    @staticmethod
+    def _win_text_safe(user32, hwnd, timeout_ms: int = 250):
+        """GetWindowText that aborts instead of blocking if the target window's
+        message loop is hung (e.g. a frozen emulator guest). Returns None on timeout."""
+        import ctypes
+        SMTO_ABORTIFHUNG  = 0x0002
+        WM_GETTEXTLENGTH  = 0x000E
+        WM_GETTEXT        = 0x000D
+
+        # Explicit argtypes required: without them ctypes guesses the LPARAM type
+        # from the Python arg it's handed, and a raw pointer int from
+        # ctypes.addressof() on a 64-bit build overflows the guessed 32-bit type.
+        # Root-caused live 2026-10-12 (gui_20261012.log, 21:46:38 — "25 window(s)
+        # errored during enumeration (argument 4: OverflowError: int too long to
+        # convert)"): this fired for 25 windows in one _arrange_memu_windows pass
+        # right after the Christ farm's 40-min timeout force-killed it, and the
+        # whole GUI process went silent immediately after and stayed dead for 5+
+        # days with nothing to notice or restart it. The 2026-09-28 fix only
+        # caught the *symptom* (the exception escaping the ctypes callback) —
+        # this is the actual cause of that exception, independently reproduced
+        # and fixed the same way in run_and_record.py's ensure_window_restored()
+        # on 2026-10-05. c_void_p accepts both an int address and a ctypes
+        # buffer/array directly, so passing buf itself below (not its address)
+        # avoids the overflow entirely rather than relying on argtypes alone.
+        user32.SendMessageTimeoutW.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(ctypes.c_size_t),
+        ]
+        user32.SendMessageTimeoutW.restype = ctypes.c_ssize_t
+
+        result = ctypes.c_size_t(0)
+        ok = user32.SendMessageTimeoutW(hwnd, WM_GETTEXTLENGTH, None, None,
+                                         SMTO_ABORTIFHUNG, timeout_ms, ctypes.byref(result))
+        if not ok:
+            return None
+        length = result.value
+        if length == 0:
+            return ""
+        if length > 8192:
+            # A non-standard window (an emulator overlay/compositor window, not a
+            # real titled control) can hand back a garbage huge value here instead
+            # of a real character count — no real window title is anywhere close
+            # to this long. Root-caused live 2026-09-28: an unclamped length blew
+            # past ctypes' internal allocation limit, raising ArgumentError INSIDE
+            # this EnumWindows callback. Exceptions can't propagate normally out of
+            # a ctypes callback (undefined behavior, not a clean catchable error) —
+            # that's what wedged the whole multi-farm run overnight instead of just
+            # failing one arrange pass. Treat it the same as a hung window.
+            return None
+        buf = ctypes.create_unicode_buffer(length + 1)
+        ok = user32.SendMessageTimeoutW(hwnd, WM_GETTEXT, length + 1, buf,
+                                         SMTO_ABORTIFHUNG, timeout_ms, ctypes.byref(result))
+        if not ok:
+            return None
+        return buf.value
+
     def _arrange_memu_windows(self):
         """Tile all visible emulator windows left-to-right across the screen.
         One window → right half. Two+ → equal columns from left to right."""
@@ -1852,24 +1975,51 @@ class BotApp(ctk.CTk):
         # Enumerate all top-level windows and collect those belonging to emulator PIDs
         EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_size_t, ctypes.c_size_t)
         found = []
+        hung = []
+
+        errored = []
 
         def _cb(hwnd, _):
-            if not user32.IsWindowVisible(hwnd):
+            try:
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                # GetWindowText* sends WM_GETTEXT to the target window and blocks until
+                # it responds — a frozen emulator guest never responds, so use the
+                # timeout-bounded variant instead of hanging the whole arrange step.
+                title = self._win_text_safe(user32, hwnd)
+                if title is None:
+                    hung.append(hwnd)
+                    return True
+                # Skip windows with no title (background/child windows)
+                if title == "":
+                    return True
+                pid = ctypes.c_ulong(0)
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if pid.value in memu_pids:
+                    # Only include top-level windows (no owner)
+                    if user32.GetWindow(hwnd, 4) == 0:  # GW_OWNER = 4
+                        found.append((title, pid.value, hwnd))
                 return True
-            # Skip windows with no title (background/child windows)
-            if user32.GetWindowTextLengthW(hwnd) == 0:
+            except Exception as e:
+                # A Python exception can't propagate normally out of a ctypes
+                # callback — it's undefined behavior on the C side rather than a
+                # clean catchable error, and root-caused live 2026-09-28 as what
+                # wedged the whole multi-farm run overnight from a single bad
+                # window instead of just failing this one arrange pass. Whatever
+                # goes wrong here, always return normally so EnumWindows keeps
+                # going and the exception never crosses that boundary.
+                errored.append((hwnd, e))
                 return True
-            pid = ctypes.c_ulong(0)
-            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            if pid.value in memu_pids:
-                # Only include top-level windows (no owner)
-                if user32.GetWindow(hwnd, 4) == 0:  # GW_OWNER = 4
-                    buf = ctypes.create_unicode_buffer(256)
-                    user32.GetWindowTextW(hwnd, buf, 256)
-                    found.append((buf.value, pid.value, hwnd))
-            return True
 
         user32.EnumWindows(EnumWindowsProc(_cb), 0)
+
+        if errored:
+            self.after(0, lambda n=len(errored), e=errored[0][1]: self._log(
+                f"  ⚠ arrange: {n} window(s) errored during enumeration (e.g. {e}) — skipped", "warn"))
+
+        if hung:
+            self.after(0, lambda n=len(hung): self._log(
+                f"  ⚠ arrange: {n} window(s) unresponsive (frozen emulator?) — skipped", "warn"))
 
         if not found:
             self.after(0, lambda: self._log(f"  ℹ arrange: {emu_type} running but no top-level window found yet", "info"))
@@ -2005,8 +2155,7 @@ class BotApp(ctk.CTk):
                     self.after(0, self._stop_timer)
                     return
                 if self.bot_settings.get("auto_arrange", True):
-                    with self._arrange_lock:
-                        self._arrange_memu_windows()
+                    self._try_arrange_memu_windows()
 
                 # Step 3 — wire bot connection to engine/executor
                 bot    = launcher.get_bot(idx)
@@ -2306,8 +2455,18 @@ class BotApp(ctk.CTk):
                 if engine._thread:
                     engine._thread.join(timeout=max_timeout_sec)
                     if engine._thread.is_alive():
+                        # Time budget reached: ask for a clean stop at the next task
+                        # boundary first (a rally loop is many short tasks), and only
+                        # hard-kill if the current task overruns the grace period.
+                        _grace_sec = float(self.bot_settings.get("soft_stop_grace_min", 6)) * 60
                         self.after(0, lambda: self._log(
-                            f"  ⚠ {name}: farm exceeded {self.bot_settings.get('max_farm_timeout', 40)} min timeout — {'force killing' if force_kill else 'signaling stop'}",
+                            f"  ⏱ {name}: {self.bot_settings.get('max_farm_timeout', 40)} min budget reached — "
+                            f"finishing current task (up to {_grace_sec / 60:g} min grace)", "warn"))
+                        engine.request_soft_stop()
+                        engine._thread.join(timeout=_grace_sec)
+                    if engine._thread.is_alive():
+                        self.after(0, lambda: self._log(
+                            f"  ⚠ {name}: current task overran the soft-stop grace period — {'force killing' if force_kill else 'signaling stop'}",
                             "warn"))
                         engine.stop()
                         if force_kill:
@@ -2376,8 +2535,7 @@ class BotApp(ctk.CTk):
                     launcher.stop_instance(idx)
                     self.after(0, lambda: self._log(f"  ✓ {name} — emulator closed", "info"))
                     if self.bot_settings.get("auto_arrange", True):
-                        with self._arrange_lock:
-                            self._arrange_memu_windows()
+                        self._try_arrange_memu_windows()
                 except Exception:
                     pass
 
@@ -2415,7 +2573,10 @@ class BotApp(ctk.CTk):
         # is None and that code is unreachable. This watchdog monitors the farm
         # thread itself and force-kills if it's still alive after max_farm_timeout.
         if self.bot_settings.get("force_kill_hung", True):
-            _w_timeout = float(self.bot_settings.get("max_farm_timeout", 40)) * 60
+            # Allow for the soft-stop grace period (+1 min for emulator teardown) so
+            # this watchdog doesn't kill the emulator mid-way through a clean stop.
+            _w_timeout = (float(self.bot_settings.get("max_farm_timeout", 40))
+                          + float(self.bot_settings.get("soft_stop_grace_min", 6)) + 1) * 60
             _w_name    = name
             _w_idx     = idx
 
@@ -2735,6 +2896,72 @@ class BotApp(ctk.CTk):
         except Exception:
             pass
 
+    # ── Hang watchdog ────────────────────────────────────────────────────
+
+    # How long the Tk main thread can go without a heartbeat before the
+    # watchdog treats it as hung rather than just doing something slow for a
+    # moment. The heartbeat itself ticks every 5s, so this gives a wide margin
+    # against false positives while still recovering in minutes instead of
+    # the 5+ days the un-caught version of this actually sat dead for.
+    _HEARTBEAT_INTERVAL_MS = 5000
+    _HANG_THRESHOLD_SEC = 300
+
+    def _heartbeat_tick(self):
+        """Touched only from the Tk main thread's own event loop — see
+        _watchdog_loop for why that's exactly the property this needs."""
+        self._last_alive = time.time()
+        self.after(self._HEARTBEAT_INTERVAL_MS, self._heartbeat_tick)
+
+    def _watchdog_loop(self):
+        """
+        Runs on its own daemon thread, independent of the Tk main thread, so
+        it keeps running even if the main thread itself is the one that's
+        hung — which is exactly what happened live 2026-10-12 (gui_20261012.log):
+        _arrange_memu_windows, which runs on the main thread via self.after(),
+        froze the whole process immediately after a batch of window-enumeration
+        errors. Nothing noticed; the process sat alive-but-unresponsive for
+        5+ days until a human happened to check. This closes that gap.
+
+        Only acts when keep_running.flag is present — i.e. only when the user
+        actually asked for continuous/unattended operation. A hang during
+        manual/dev use with farming stopped is not this thread's business.
+        """
+        while True:
+            time.sleep(30)
+            if not self._keep_running_flag.exists():
+                continue
+            stale = time.time() - self._last_alive
+            if stale > self._HANG_THRESHOLD_SEC:
+                self._trigger_watchdog_relaunch(stale)
+                return  # process is being terminated below; nothing left to watch
+
+    def _trigger_watchdog_relaunch(self, stale_seconds: float):
+        # Don't rely on the normal log pipeline here — it's plumbed through
+        # the main thread (self.after/self._log), which is precisely what we
+        # just determined is hung. Write directly to a dedicated file instead
+        # so there's always a record this fired, independent of anything else
+        # in the app working.
+        try:
+            watchdog_log = get_app_dir() / "logs" / "watchdog.log"
+            watchdog_log.parent.mkdir(parents=True, exist_ok=True)
+            with open(watchdog_log, "a", encoding="utf-8") as f:
+                f.write(
+                    f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Main thread unresponsive for "
+                    f"{stale_seconds:.0f}s — self-relaunching\n"
+                )
+        except Exception:
+            pass
+        _spawn_relaunch_batch()
+        # Immediate process termination, not a clean Python exit — the main
+        # thread is stuck inside something (a blocking Win32 call, most likely)
+        # that a normal exit can't safely unwind. os._exit() is an OS-level
+        # kill that works regardless of what any thread is doing, and it
+        # releases the single-instance mutex the same way any process death
+        # does, which the relaunch batch's own startup delay already accounts
+        # for.
+        import os
+        os._exit(1)
+
     def _start_all(self):
         self._set_keep_running_flag()
         self._halted.clear()  # allow farm threads to run
@@ -2836,7 +3063,8 @@ class BotApp(ctk.CTk):
                                 self._log(f"  ⏭ Skipping {label} — daily limit already reached ({done}/{max_rallies})", "info")
                                 continue
                             for i in range(repeat):
-                                tasks.append({"name": f"{label} ({done + i + 1}/{max_rallies})", "actions": actions})
+                                tasks.append({"name": f"{label} ({done + i + 1}/{max_rallies})", "actions": actions,
+                                              "rally_group": "create_rally"})
                             self._log(f"  ✓ {label} — {len(actions)} actions x{repeat} (already done today: {done}/{max_rallies})", "info")
                         else:
                             tasks.append({"name": f"{label} (1/1)", "actions": actions})
@@ -3705,22 +3933,9 @@ if __name__ == "__main__":
     app.mainloop()
 
     # Keep Running: if the flag is still present after mainloop exits, the
-    # closure was unexpected (not Stop or X). Spawn a detached batch that
-    # waits a few seconds then re-launches the exe, giving the current process
-    # time to fully exit and release the single-instance mutex first.
-    import subprocess as _sp, tempfile as _tf
+    # closure was unexpected (not Stop or X) — e.g. an uncaught exception
+    # unwound mainloop. Relaunch via the same mechanism the watchdog thread
+    # uses for a true hang (see _spawn_relaunch_batch's docstring).
     _flag = get_app_dir() / "keep_running.flag"
     if _flag.exists():
-        if getattr(sys, "frozen", False):
-            _launch_cmd = f'start "" "{sys.executable}"'
-        else:
-            _launch_cmd = f'start "" "{sys.executable}" "{Path(__file__).resolve()}"'
-        _bat = Path(_tf.gettempdir()) / "lastz_restart.bat"
-        _bat.write_text(
-            f"@echo off\ntimeout /t 4 /nobreak > nul\n{_launch_cmd}\ndel \"%~f0\"\n"
-        )
-        _sp.Popen(
-            ["cmd.exe", "/c", str(_bat)],
-            creationflags=_sp.DETACHED_PROCESS | _sp.CREATE_NEW_PROCESS_GROUP,
-            close_fds=True,
-        )
+        _spawn_relaunch_batch()
